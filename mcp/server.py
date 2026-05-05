@@ -13,7 +13,7 @@ EMBED_MODEL = "nomic-embed-text"
 HOST        = os.environ.get("MCP_HOST", "0.0.0.0")
 PORT        = int(os.environ.get("MCP_PORT", "8765"))
 
-mcp = FastMCP("cortex")
+mcp = FastMCP("cortex", host=HOST, port=PORT)
 
 
 def embed(text: str) -> list[float]:
@@ -98,4 +98,4 @@ def reindex(notes: bool = True, code: bool = True) -> str:
 
 if __name__ == "__main__":
     threading.Thread(target=warmup, daemon=True).start()
-    mcp.run(transport="sse", host=HOST, port=PORT)
+    mcp.run(transport="sse")
