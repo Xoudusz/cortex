@@ -19,21 +19,9 @@ services:
       - "6334:6334"
 
   cortex-mcp:
-    build: ./mcp
+    image: ghcr.io/xoudusz/cortex-mcp:latest
     container_name: cortex-mcp
     restart: unless-stopped
-    environment:
-      - OLLAMA_URL=http://ollama:11434
-      - QDRANT_URL=http://qdrant:6333
-    ports:
-      - "8765:8765"
-    depends_on:
-      - ollama
-      - qdrant
-
-  cortex-indexer:
-    build: ./indexer
-    container_name: cortex-indexer
     environment:
       - OLLAMA_URL=http://ollama:11434
       - QDRANT_URL=http://qdrant:6333
@@ -41,8 +29,8 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
     volumes:
       - /home/docker/volumes/syncthing/notes:/notes:ro
-    profiles:
-      - index
+    ports:
+      - "8765:8765"
     depends_on:
       - ollama
       - qdrant

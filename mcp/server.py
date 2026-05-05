@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import subprocess
 import threading
 
 import httpx
@@ -74,6 +75,25 @@ def search_code(query: str, limit: int = 5) -> str:
         url = p.get("github_url", "")
         parts.append(f"{header}\n{url}\n\n{p['text']}" if url else f"{header}\n\n{p['text']}")
     return "\n\n---\n\n".join(parts)
+
+
+@mcp.tool()
+def reindex(notes: bool = True, code: bool = True) -> str:
+    """Re-index Obsidian notes and/or source code into Qdrant. Takes a few minutes."""
+    parts = []
+    if notes:
+        r = subprocess.run(
+            ["python3", "/app/index.py"],
+            capture_output=True, text=True, timeout=300,
+        )
+        parts.append(f"=== Notes ===\n{r.stdout}{r.stderr}".strip())
+    if code:
+        r = subprocess.run(
+            ["python3", "/app/index_code.py"],
+            capture_output=True, text=True, timeout=600,
+        )
+        parts.append(f"=== Code ===\n{r.stdout}{r.stderr}".strip())
+    return "\n\n".join(parts) or "Nothing to index."
 
 
 if __name__ == "__main__":

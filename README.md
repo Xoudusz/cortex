@@ -23,11 +23,11 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 docker exec ollama ollama pull nomic-embed-text
 ```
 
-**Post-deploy — index everything:**
-```bash
-docker compose --profile index run --rm cortex-indexer
+**Post-deploy — index everything** (via Claude Code after MCP is registered):
 ```
-Set `GITHUB_TOKEN` env var in Portainer stack settings to clone private repos.
+reindex()
+```
+Or set `GITHUB_TOKEN` env var in Portainer stack settings to enable private repo cloning.
 
 ## Register MCP in Claude Code (run on vibecode)
 
