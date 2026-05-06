@@ -7,12 +7,16 @@ import time
 import httpx
 from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
-OLLAMA_URL  = os.environ.get("OLLAMA_URL", "http://ollama:11434")
-QDRANT_URL  = os.environ.get("QDRANT_URL", "http://qdrant:6333")
-EMBED_MODEL = "nomic-embed-text"
-HOST        = os.environ.get("MCP_HOST", "0.0.0.0")
-PORT        = int(os.environ.get("MCP_PORT", "8765"))
+OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://ollama:11434")
+QDRANT_URL   = os.environ.get("QDRANT_URL", "http://qdrant:6333")
+EMBED_MODEL  = "nomic-embed-text"
+HOST         = os.environ.get("MCP_HOST", "0.0.0.0")
+PORT         = int(os.environ.get("MCP_PORT", "8765"))
+NOTES_PATH   = os.environ.get("NOTES_PATH", "/notes")
+WATCH_DEBOUNCE = int(os.environ.get("WATCH_DEBOUNCE", "60"))
 
 mcp = FastMCP("cortex", host=HOST, port=PORT)
 
@@ -125,6 +129,35 @@ def reindex_status() -> str:
     return "\n\n".join(lines)
 
 
+class _NotesHandler(FileSystemEventHandler):
+    def __init__(self):
+        self._timer: threading.Timer | None = None
+
+    def on_any_event(self, event):
+        if event.is_directory or not event.src_path.endswith(".md"):
+            return
+        if self._timer:
+            self._timer.cancel()
+        self._timer = threading.Timer(WATCH_DEBOUNCE, self._trigger)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _trigger(self):
+        with _reindex_lock:
+            if _reindex_state["running"]:
+                return
+            threading.Thread(target=_run_reindex, args=(True, False), daemon=True).start()
+
+
+def _start_watcher():
+    if not os.path.isdir(NOTES_PATH):
+        return
+    observer = Observer()
+    observer.schedule(_NotesHandler(), NOTES_PATH, recursive=True)
+    observer.start()
+
+
 if __name__ == "__main__":
     threading.Thread(target=warmup, daemon=True).start()
+    threading.Thread(target=_start_watcher, daemon=True).start()
     mcp.run(transport="sse")
