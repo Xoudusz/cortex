@@ -2,3 +2,5 @@ mcp[cli]
 httpx
 qdrant-client
 watchdog
+uvicorn
+starlette

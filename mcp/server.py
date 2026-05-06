@@ -5,9 +5,17 @@ import subprocess
 import threading
 import time
 
+import hashlib
+import hmac
+
 import httpx
+import uvicorn
 from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -18,13 +26,14 @@ logging.basicConfig(
 )
 log = logging.getLogger("cortex")
 
-OLLAMA_URL     = os.environ.get("OLLAMA_URL", "http://ollama:11434")
-QDRANT_URL     = os.environ.get("QDRANT_URL", "http://qdrant:6333")
-EMBED_MODEL    = "nomic-embed-text"
-HOST           = os.environ.get("MCP_HOST", "0.0.0.0")
-PORT           = int(os.environ.get("MCP_PORT", "8765"))
-NOTES_PATH     = os.environ.get("NOTES_PATH", "/notes")
-WATCH_DEBOUNCE = int(os.environ.get("WATCH_DEBOUNCE", "60"))
+OLLAMA_URL      = os.environ.get("OLLAMA_URL", "http://ollama:11434")
+QDRANT_URL      = os.environ.get("QDRANT_URL", "http://qdrant:6333")
+EMBED_MODEL     = "nomic-embed-text"
+HOST            = os.environ.get("MCP_HOST", "0.0.0.0")
+PORT            = int(os.environ.get("MCP_PORT", "8765"))
+NOTES_PATH      = os.environ.get("NOTES_PATH", "/notes")
+WATCH_DEBOUNCE  = int(os.environ.get("WATCH_DEBOUNCE", "60"))
+WEBHOOK_SECRET  = os.environ.get("WEBHOOK_SECRET", "")
 
 mcp = FastMCP("cortex", host=HOST, port=PORT)
 
@@ -188,6 +197,26 @@ class _NotesHandler(FileSystemEventHandler):
             threading.Thread(target=_run_reindex, args=(True, False), daemon=True).start()
 
 
+async def webhook(request: Request) -> JSONResponse:
+    body = await request.body()
+    if WEBHOOK_SECRET:
+        sig = request.headers.get("X-Hub-Signature-256", "")
+        expected = "sha256=" + hmac.new(WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            log.warning("[webhook] invalid signature — rejected")
+            return JSONResponse({"error": "invalid signature"}, status_code=401)
+    event = request.headers.get("X-GitHub-Event", "")
+    if event != "push":
+        return JSONResponse({"status": "ignored", "event": event})
+    with _reindex_lock:
+        if _reindex_state["running"]:
+            log.info("[webhook] push received but reindex already running")
+            return JSONResponse({"status": "reindex already running"})
+        threading.Thread(target=_run_reindex, args=(False, True), daemon=True).start()
+    log.info("[webhook] push → code reindex triggered")
+    return JSONResponse({"status": "ok"})
+
+
 def _start_watcher():
     if not os.path.isdir(NOTES_PATH):
         log.warning("[watcher] notes path %s not found, skipping", NOTES_PATH)
@@ -201,4 +230,9 @@ def _start_watcher():
 if __name__ == "__main__":
     threading.Thread(target=warmup, daemon=True).start()
     threading.Thread(target=_start_watcher, daemon=True).start()
-    mcp.run(transport="sse")
+    sse_app = mcp.sse_app()
+    app = Starlette(routes=[
+        Route("/webhook", webhook, methods=["POST"]),
+        Mount("/", app=sse_app),
+    ])
+    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
