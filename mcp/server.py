@@ -2,6 +2,7 @@
 import os
 import subprocess
 import threading
+import time
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -77,23 +78,51 @@ def search_code(query: str, limit: int = 5) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+_reindex_lock = threading.Lock()
+_reindex_state: dict = {"running": False, "started_at": None, "output": [], "error": None, "done": False}
+
+
+def _run_reindex(notes: bool, code: bool) -> None:
+    _reindex_state.update(running=True, started_at=time.time(), output=[], error=None, done=False)
+    try:
+        if notes:
+            _reindex_state["output"].append("=== Notes: starting ===")
+            r = subprocess.run(["python3", "/app/index.py"], capture_output=True, text=True, timeout=300)
+            _reindex_state["output"].append(f"=== Notes ===\n{r.stdout}{r.stderr}".strip())
+        if code:
+            _reindex_state["output"].append("=== Code: starting ===")
+            r = subprocess.run(["python3", "/app/index_code.py"], capture_output=True, text=True, timeout=600)
+            _reindex_state["output"].append(f"=== Code ===\n{r.stdout}{r.stderr}".strip())
+    except Exception as e:
+        _reindex_state["error"] = str(e)
+    finally:
+        _reindex_state.update(running=False, done=True)
+
+
 @mcp.tool()
 def reindex(notes: bool = True, code: bool = True) -> str:
-    """Re-index Obsidian notes and/or source code into Qdrant. Takes a few minutes."""
-    parts = []
-    if notes:
-        r = subprocess.run(
-            ["python3", "/app/index.py"],
-            capture_output=True, text=True, timeout=300,
-        )
-        parts.append(f"=== Notes ===\n{r.stdout}{r.stderr}".strip())
-    if code:
-        r = subprocess.run(
-            ["python3", "/app/index_code.py"],
-            capture_output=True, text=True, timeout=600,
-        )
-        parts.append(f"=== Code ===\n{r.stdout}{r.stderr}".strip())
-    return "\n\n".join(parts) or "Nothing to index."
+    """Start async re-indexing of Obsidian notes and/or source code into Qdrant. Returns immediately; use reindex_status() to check progress."""
+    with _reindex_lock:
+        if _reindex_state["running"]:
+            return "Reindex already in progress. Use reindex_status() to check."
+        threading.Thread(target=_run_reindex, args=(notes, code), daemon=True).start()
+    return "Reindex started in background. Use reindex_status() to check progress."
+
+
+@mcp.tool()
+def reindex_status() -> str:
+    """Check status of the last reindex operation."""
+    s = _reindex_state
+    if s["started_at"] is None:
+        return "No reindex has been run yet."
+    elapsed = time.time() - s["started_at"]
+    status = "running" if s["running"] else "done"
+    lines = [f"Status: {status} ({elapsed:.0f}s elapsed)"]
+    if s["output"]:
+        lines.append("\n".join(s["output"]))
+    if s["error"]:
+        lines.append(f"Error: {s['error']}")
+    return "\n\n".join(lines)
 
 
 if __name__ == "__main__":
