@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import logging
 import os
 import subprocess
 import threading
@@ -10,12 +11,19 @@ from qdrant_client import QdrantClient
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://ollama:11434")
-QDRANT_URL   = os.environ.get("QDRANT_URL", "http://qdrant:6333")
-EMBED_MODEL  = "nomic-embed-text"
-HOST         = os.environ.get("MCP_HOST", "0.0.0.0")
-PORT         = int(os.environ.get("MCP_PORT", "8765"))
-NOTES_PATH   = os.environ.get("NOTES_PATH", "/notes")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger("cortex")
+
+OLLAMA_URL     = os.environ.get("OLLAMA_URL", "http://ollama:11434")
+QDRANT_URL     = os.environ.get("QDRANT_URL", "http://qdrant:6333")
+EMBED_MODEL    = "nomic-embed-text"
+HOST           = os.environ.get("MCP_HOST", "0.0.0.0")
+PORT           = int(os.environ.get("MCP_PORT", "8765"))
+NOTES_PATH     = os.environ.get("NOTES_PATH", "/notes")
 WATCH_DEBOUNCE = int(os.environ.get("WATCH_DEBOUNCE", "60"))
 
 mcp = FastMCP("cortex", host=HOST, port=PORT)
@@ -38,8 +46,9 @@ def warmup():
             json={"model": EMBED_MODEL, "prompt": "warmup"},
             timeout=20,
         )
-    except Exception:
-        pass
+        log.info("warmup OK")
+    except Exception as e:
+        log.warning("warmup failed: %s", e)
 
 
 @mcp.tool()
@@ -86,21 +95,48 @@ _reindex_lock = threading.Lock()
 _reindex_state: dict = {"running": False, "started_at": None, "output": [], "error": None, "done": False}
 
 
+def _stream(cmd: list[str], label: str, timeout: int) -> None:
+    """Run cmd, streaming each output line to logger and _reindex_state."""
+    _reindex_state["output"].append(f"=== {label}: starting ===")
+    log.info("[%s] starting", label)
+    proc = subprocess.Popen(
+        ["python3", "-u"] + cmd,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    timer = threading.Timer(timeout, proc.kill)
+    timer.start()
+    try:
+        for raw in proc.stdout:
+            line = raw.rstrip()
+            if line:
+                log.info("[%s] %s", label, line)
+                _reindex_state["output"].append(line)
+        proc.wait()
+    finally:
+        timer.cancel()
+    if proc.returncode not in (0, None):
+        msg = f"=== {label}: exited {proc.returncode} ==="
+        log.warning(msg)
+        _reindex_state["output"].append(msg)
+    else:
+        log.info("[%s] done", label)
+
+
 def _run_reindex(notes: bool, code: bool) -> None:
     _reindex_state.update(running=True, started_at=time.time(), output=[], error=None, done=False)
+    log.info("reindex started (notes=%s code=%s)", notes, code)
     try:
         if notes:
-            _reindex_state["output"].append("=== Notes: starting ===")
-            r = subprocess.run(["python3", "/app/index.py"], capture_output=True, text=True, timeout=300)
-            _reindex_state["output"].append(f"=== Notes ===\n{r.stdout}{r.stderr}".strip())
+            _stream(["/app/index.py"], "notes", 300)
         if code:
-            _reindex_state["output"].append("=== Code: starting ===")
-            r = subprocess.run(["python3", "/app/index_code.py"], capture_output=True, text=True, timeout=600)
-            _reindex_state["output"].append(f"=== Code ===\n{r.stdout}{r.stderr}".strip())
+            _stream(["/app/index_code.py"], "code", 600)
     except Exception as e:
         _reindex_state["error"] = str(e)
+        log.error("reindex error: %s", e)
     finally:
+        elapsed = time.time() - _reindex_state["started_at"]
         _reindex_state.update(running=False, done=True)
+        log.info("reindex finished in %.0fs", elapsed)
 
 
 @mcp.tool()
@@ -134,8 +170,9 @@ class _NotesHandler(FileSystemEventHandler):
         self._timer: threading.Timer | None = None
 
     def on_any_event(self, event):
-        if event.is_directory or not event.src_path.endswith(".md"):
+        if event.is_directory or not str(event.src_path).endswith(".md"):
             return
+        log.info("[watcher] change: %s — debouncing %ds", event.src_path, WATCH_DEBOUNCE)
         if self._timer:
             self._timer.cancel()
         self._timer = threading.Timer(WATCH_DEBOUNCE, self._trigger)
@@ -145,16 +182,20 @@ class _NotesHandler(FileSystemEventHandler):
     def _trigger(self):
         with _reindex_lock:
             if _reindex_state["running"]:
+                log.info("[watcher] reindex already running, skipping")
                 return
+            log.info("[watcher] debounce elapsed — triggering notes reindex")
             threading.Thread(target=_run_reindex, args=(True, False), daemon=True).start()
 
 
 def _start_watcher():
     if not os.path.isdir(NOTES_PATH):
+        log.warning("[watcher] notes path %s not found, skipping", NOTES_PATH)
         return
     observer = Observer()
     observer.schedule(_NotesHandler(), NOTES_PATH, recursive=True)
     observer.start()
+    log.info("[watcher] watching %s for .md changes (debounce %ds)", NOTES_PATH, WATCH_DEBOUNCE)
 
 
 if __name__ == "__main__":
