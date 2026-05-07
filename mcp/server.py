@@ -197,6 +197,10 @@ class _NotesHandler(FileSystemEventHandler):
             threading.Thread(target=_run_reindex, args=(True, False), daemon=True).start()
 
 
+async def health(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok"})
+
+
 async def webhook(request: Request) -> JSONResponse:
     body = await request.body()
     if WEBHOOK_SECRET:
@@ -232,6 +236,7 @@ if __name__ == "__main__":
     threading.Thread(target=_start_watcher, daemon=True).start()
     sse_app = mcp.sse_app()
     app = Starlette(routes=[
+        Route("/health", health, methods=["GET"]),
         Route("/webhook", webhook, methods=["POST"]),
         Mount("/", app=sse_app),
     ])
