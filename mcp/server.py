@@ -273,7 +273,7 @@ if __name__ == "__main__":
     sse_app = mcp.sse_app()
     app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
-        Route("/webhook", webhook, methods=[["POST"]),
+        Route("/webhook", webhook, methods=["POST"]),
         Mount("/", app=sse_app),
     ])
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
