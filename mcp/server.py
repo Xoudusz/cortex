@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import logging
 import os
 import subprocess
@@ -154,14 +155,17 @@ def _stream(cmd: list[str], label: str, timeout: int) -> None:
         log.info("[%s] done", label)
 
 
-def _run_reindex(notes: bool, code: bool) -> None:
+def _run_reindex(notes: bool, code: bool, repo: str = "") -> None:
     _reindex_state.update(running=True, started_at=time.time(), output=[], error=None, done=False)
-    log.info("reindex started (notes=%s code=%s)", notes, code)
+    log.info("reindex started (notes=%s code=%s repo=%s)", notes, code, repo or "all")
     try:
         if notes:
             _stream(["/app/index.py"], "notes", 300)
         if code:
-            _stream(["/app/index_code.py"], "code", 600)
+            cmd = ["/app/index_code.py"]
+            if repo:
+                cmd += ["--repo", repo]
+            _stream(cmd, "code", 600)
     except Exception as e:
         _reindex_state["error"] = str(e)
         log.error("reindex error: %s", e)
@@ -172,7 +176,7 @@ def _run_reindex(notes: bool, code: bool) -> None:
 
 
 @mcp.tool()
-def reindex(notes: bool = True, code: bool = True) -> str:
+def reindex(notes: bool = True, code: bool = True, repo: str = "") -> str:
     """Trigger re-indexing of notes and/or source code into Qdrant.
 
     Use when:
@@ -182,11 +186,12 @@ def reindex(notes: bool = True, code: bool = True) -> str:
 
     Runs async — returns immediately. Call reindex_status() to check progress.
     Set notes=False to only reindex code, or code=False for notes only.
+    Set repo to a specific repo name (e.g. "svelte-radio") to only reindex that repo.
     """
     with _reindex_lock:
         if _reindex_state["running"]:
             return "Reindex already in progress. Use reindex_status() to check."
-        threading.Thread(target=_run_reindex, args=(notes, code), daemon=True).start()
+        threading.Thread(target=_run_reindex, args=(notes, code, repo), daemon=True).start()
     return "Reindex started in background. Use reindex_status() to check progress."
 
 
@@ -230,7 +235,7 @@ class _NotesHandler(FileSystemEventHandler):
                 log.info("[watcher] reindex already running, skipping")
                 return
             log.info("[watcher] debounce elapsed — triggering notes reindex")
-            threading.Thread(target=_run_reindex, args=(True, False), daemon=True).start()
+            threading.Thread(target=_run_reindex, args=(True, False, ""), daemon=True).start()
 
 
 async def health(request: Request) -> JSONResponse:
@@ -248,13 +253,17 @@ async def webhook(request: Request) -> JSONResponse:
     event = request.headers.get("X-GitHub-Event", "")
     if event != "push":
         return JSONResponse({"status": "ignored", "event": event})
+    try:
+        repo = json.loads(body).get("repository", {}).get("name", "")
+    except Exception:
+        repo = ""
     with _reindex_lock:
         if _reindex_state["running"]:
             log.info("[webhook] push received but reindex already running")
             return JSONResponse({"status": "reindex already running"})
-        threading.Thread(target=_run_reindex, args=(False, True), daemon=True).start()
-    log.info("[webhook] push → code reindex triggered")
-    return JSONResponse({"status": "ok"})
+        threading.Thread(target=_run_reindex, args=(False, True, repo), daemon=True).start()
+    log.info("[webhook] push on %s → code reindex triggered", repo or "unknown")
+    return JSONResponse({"status": "ok", "repo": repo})
 
 
 def _start_watcher():
