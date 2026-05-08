@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Clone active GitHub repos and index source code into Qdrant 'code' collection."""
 
+import argparse
 import hashlib
 import os
 import subprocess
@@ -18,7 +19,7 @@ EMBED_MODEL    = "nomic-embed-text"
 VECTOR_SIZE    = 768
 CHUNK_LINES    = 30
 OVERLAP_LINES  = 5
-MAX_CHUNK_LINES = 80  # semantic nodes larger than this get sliding-windowed
+MAX_CHUNK_LINES = 80
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
@@ -31,7 +32,7 @@ LANG_MAP  = {
     ".kt": "kotlin", ".kts": "kotlin", ".gd": "gdscript",
 }
 
-REPOS = [
+ALL_REPOS = [
     "Xoudusz/weakness-dex",
     "Xoudusz/mtgdle",
     "Xoudusz/tower-of-evolon",
@@ -96,7 +97,6 @@ def clone_or_pull(repo: str) -> Path:
 
 
 def _sliding_window(lines: list[str], start: int, end: int, repo_name: str, rel: str, language: str) -> list[dict]:
-    """Sliding window chunks over lines[start:end] (0-indexed, exclusive end)."""
     step = CHUNK_LINES - OVERLAP_LINES
     chunks = []
     i = start
@@ -117,7 +117,6 @@ def _sliding_window(lines: list[str], start: int, end: int, repo_name: str, rel:
 
 
 def _collect_semantic_nodes(node, target_types: set, depth: int = 0, max_depth: int = 5) -> list:
-    """Walk AST, collect nodes of target_types without recursing into matched nodes."""
     if node.type in target_types:
         return [node]
     if depth >= max_depth:
@@ -146,12 +145,11 @@ def chunk_file(path: Path, repo_name: str) -> list[dict]:
             parser = _TSParser(_TS_LANGUAGES[ext])
             tree   = parser.parse(source)
             nodes  = _collect_semantic_nodes(tree.root_node, _TS_SEMANTIC[ext])
-
             if nodes:
                 chunks = []
                 for node in nodes:
-                    s = node.start_point[0]    # 0-indexed row
-                    e = node.end_point[0] + 1  # exclusive
+                    s = node.start_point[0]
+                    e = node.end_point[0] + 1
                     if e - s > MAX_CHUNK_LINES:
                         chunks.extend(_sliding_window(lines, s, e, repo_name, rel, language))
                     else:
@@ -165,12 +163,24 @@ def chunk_file(path: Path, repo_name: str) -> list[dict]:
                             })
                 return chunks
         except Exception:
-            pass  # fall through to sliding window
+            pass
 
     return _sliding_window(lines, 0, len(lines), repo_name, rel, language)
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo", default="", help="Only index this repo name (e.g. svelte-radio)")
+    args = parser.parse_args()
+
+    if args.repo:
+        repos = [r for r in ALL_REPOS if r.split("/")[1] == args.repo]
+        if not repos:
+            print(f"Unknown repo: {args.repo}. Valid: {[r.split('/')[1] for r in ALL_REPOS]}")
+            return
+    else:
+        repos = ALL_REPOS
+
     REPOS_DIR.mkdir(parents=True, exist_ok=True)
     client = QdrantClient(url=QDRANT_URL)
 
@@ -184,7 +194,7 @@ def main():
 
     print(f"Chunking mode: {'tree-sitter' if _TS_AVAILABLE else 'sliding-window (fallback)'}")
 
-    for repo in REPOS:
+    for repo in repos:
         name = repo.split("/")[1]
         try:
             repo_path = clone_or_pull(repo)
