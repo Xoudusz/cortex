@@ -62,7 +62,17 @@ def warmup():
 
 @mcp.tool()
 def search_notes(query: str, limit: int = 5) -> str:
-    """Semantic search over Obsidian notes. Returns sections with file path, heading, and tags."""
+    """Search the user's personal Obsidian knowledge base semantically.
+
+    Call this proactively whenever the user asks about:
+    - Their projects, plans, ideas, or roadmap items
+    - Personal context, goals, or decisions they may have documented
+    - How something in their setup works (server config, tools, workflows)
+    - Anything that sounds like it could be in personal notes
+
+    Returns matching note sections with file path, heading, score, and tags.
+    Prefer this over asking the user to explain context they may have already written down.
+    """
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
     results = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
@@ -81,7 +91,20 @@ def search_notes(query: str, limit: int = 5) -> str:
 
 @mcp.tool()
 def search_code(query: str, limit: int = 5) -> str:
-    """Semantic search over source code repos (weakness-dex, mtgdle, tower-of-evolon, svelte-radio). Returns chunks with GitHub links."""
+    """Search source code across the user's active repos semantically.
+
+    Indexed repos: weakness-dex, mtgdle, tower-of-evolon, tower-of-evolon-backend, svelte-radio.
+
+    Call this proactively whenever:
+    - Implementing a feature that touches one of these repos
+    - Looking for where something is defined or how a pattern is used
+    - Debugging — find related code before suggesting a fix
+    - The user asks "how does X work" about one of their projects
+    - Writing code that should match existing conventions in the repo
+
+    Returns code chunks with file path, line numbers, language, score, and GitHub link.
+    Always search before writing code for these repos — don't guess at existing patterns.
+    """
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
     results = client.query_points("code", query=vector, limit=limit, with_payload=True).points
@@ -150,7 +173,16 @@ def _run_reindex(notes: bool, code: bool) -> None:
 
 @mcp.tool()
 def reindex(notes: bool = True, code: bool = True) -> str:
-    """Start async re-indexing of Obsidian notes and/or source code into Qdrant. Returns immediately; use reindex_status() to check progress."""
+    """Trigger re-indexing of notes and/or source code into Qdrant.
+
+    Use when:
+    - search_notes or search_code returns stale or missing results
+    - The user says they updated their notes or pushed new code
+    - Starting a session after a long gap (index may be outdated)
+
+    Runs async — returns immediately. Call reindex_status() to check progress.
+    Set notes=False to only reindex code, or code=False for notes only.
+    """
     with _reindex_lock:
         if _reindex_state["running"]:
             return "Reindex already in progress. Use reindex_status() to check."
@@ -160,7 +192,11 @@ def reindex(notes: bool = True, code: bool = True) -> str:
 
 @mcp.tool()
 def reindex_status() -> str:
-    """Check status of the last reindex operation."""
+    """Check whether a reindex is running or finished, and see its output log.
+
+    Call this after reindex() to monitor progress. Returns elapsed time, status,
+    streamed output lines, and any errors.
+    """
     s = _reindex_state
     if s["started_at"] is None:
         return "No reindex has been run yet."
@@ -237,7 +273,7 @@ if __name__ == "__main__":
     sse_app = mcp.sse_app()
     app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
-        Route("/webhook", webhook, methods=["POST"]),
+        Route("/webhook", webhook, methods=[["POST"]),
         Mount("/", app=sse_app),
     ])
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
