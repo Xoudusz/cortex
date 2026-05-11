@@ -10,6 +10,14 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 | Qdrant | 6333 | Vector store — collections: `notes`, `code` |
 | cortex-mcp | 8765 | MCP SSE server for Claude Code |
 
+## Endpoints
+
+| Path | Method | Description |
+|------|--------|-------------|
+| `/sse` | GET | MCP SSE endpoint (requires `x-api-key` header) |
+| `/health` | GET | Health check for autoheal |
+| `/webhook` | POST | GitHub push webhook — triggers per-repo code reindex |
+
 ## Deploy (Portainer)
 
 1. Stacks → Add Stack → Repository
@@ -29,16 +37,41 @@ reindex()
 ```
 Or set `GITHUB_TOKEN` env var in Portainer stack settings to enable private repo cloning.
 
-## Register MCP in Claude Code (run on vibecode)
+## Register MCP in Claude Code (run on client)
 
 ```bash
-claude mcp remove notes-search 2>/dev/null; true
-claude mcp add cortex --transport sse http://cortex.local.hyvitech.org:8765/sse
+claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse \
+  --header "x-api-key: <your-api-key>"
 ```
+
+## Environment variables
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint |
+| `QDRANT_URL` | `http://qdrant:6333` | Qdrant endpoint |
+| `NOTES_PATH` | `/notes` | Notes mount path (watched for changes) |
+| `MCP_HOST` | `0.0.0.0` | Server bind host |
+| `MCP_PORT` | `8765` | Server bind port |
+| `API_KEY` | — | Required for `/sse` endpoint auth |
+| `WATCH_DEBOUNCE` | `60` | Seconds to debounce notes watcher |
+| `GITHUB_TOKEN` | — | For cloning private repos |
+| `WEBHOOK_SECRET` | — | GitHub webhook signature validation |
 
 ## Re-index
 
-Run any time notes or code change:
+**Manual** (via Claude Code MCP):
+```
+reindex()           # all
+reindex(code=False) # notes only
+reindex(notes=False, repo="svelte-radio")  # single repo
+```
+
+**Automatic triggers:**
+- **Notes watcher** — detects .md changes, debounces 60s, triggers notes reindex
+- **GitHub webhook** — on push event, triggers code reindex for that repo only
+
+**CLI fallback:**
 ```bash
 docker compose --profile index run --rm cortex-indexer
 ```
@@ -48,7 +81,9 @@ docker compose --profile index run --rm cortex-indexer
 | Collection | Chunk strategy | Key payload fields |
 |------------|---------------|-------------------|
 | `notes` | H1-H3 heading boundaries | `file`, `heading`, `tags`, `modified_at`, `text` |
-| `code` | 30-line sliding window (5-line overlap) | `repo`, `file`, `language`, `start_line`, `end_line`, `github_url`, `text` |
+| `code` | Tree-sitter semantic (functions/classes) with sliding-window fallback | `repo`, `file`, `language`, `start_line`, `end_line`, `github_url`, `text` |
+
+Tree-sitter languages: Python, JavaScript, TypeScript, Kotlin. Others fallback to 30-line sliding window.
 
 ## Volume paths
 
