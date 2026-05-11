@@ -95,7 +95,7 @@ def search_notes(query: str, limit: int = 5) -> str:
 def search_code(query: str, limit: int = 5) -> str:
     """Search source code across the user's active repos semantically.
 
-    Indexed repos: weakness-dex, mtgdle, tower-of-evolon, tower-of-evolon-backend, svelte-radio.
+    Indexed repos: weakness-dex, mtgdle, tower-of-evolon, tower-of-evolon-backend, svelte-radio, cortex.
 
     Call this proactively whenever:
     - Implementing a feature that touches one of these repos

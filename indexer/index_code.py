@@ -38,6 +38,7 @@ ALL_REPOS = [
     "Xoudusz/tower-of-evolon",
     "Xoudusz/tower-of-evolon-backend",
     "Xoudusz/svelte-radio",
+    "Xoudusz/cortex",
 ]
 
 # --- tree-sitter setup (graceful fallback to sliding window if unavailable) ---
