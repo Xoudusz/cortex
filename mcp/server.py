@@ -246,9 +246,12 @@ class _APIKeyMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and API_KEY:
             path = scope.get("path", "")
-            # Allow OAuth discovery paths through so clients get 404 and fall back to header auth.
-            # Allow /health and /webhook which have their own auth.
-            unprotected = path in {"/health", "/webhook"} or path.startswith("/.well-known")
+            # OAuth discovery probes (/.well-known/*, /sse/.well-known/*, /register) pass through
+            # so clients get 404 and fall back to header auth. /health and /webhook have own auth.
+            unprotected = (
+                path in {"/health", "/webhook", "/register"}
+                or "/.well-known" in path
+            )
             if not unprotected:
                 headers = {k: v for k, v in scope.get("headers", [])}
                 key = headers.get(b"x-api-key", b"").decode()
