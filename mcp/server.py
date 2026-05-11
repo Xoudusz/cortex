@@ -20,6 +20,8 @@ from starlette.routing import Mount, Route
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+from web_ui import ui, api_search, api_status, api_reindex, api_stats
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(message)s",
@@ -38,6 +40,38 @@ WEBHOOK_SECRET  = os.environ.get("WEBHOOK_SECRET", "")
 API_KEY         = os.environ.get("API_KEY", "")
 
 mcp = FastMCP("cortex", host=HOST, port=PORT)
+
+ONBOARDING_TEMPLATE = '''# Cortex Onboarding
+
+## MCP Setup (if not connected)
+```bash
+claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse \\
+  --header "x-api-key: <get-from-user>"
+```
+
+## Cortex Tools
+Use PROACTIVELY — search before asking user for context.
+
+- `search_notes(query)` — Obsidian vault (projects, plans, server config, decisions)
+- `search_code(query)` — repos: weakness-dex, mtgdle, tower-of-evolon, tower-of-evolon-backend, svelte-radio, cortex
+- `reindex(notes, code, repo)` — refresh vectors if stale
+- `reindex_status()` — check progress
+
+## Preferences
+
+### Communication
+- Caveman mode: terse, no filler, fragments OK
+- Install if missing: `claude skill add caveman:caveman`
+
+### Commands
+- Always prefix bash with `rtk` for token savings
+- Install if missing: `cargo install rtk`
+
+### Git
+- User: Xoudusz <da@w23.at>
+- No co-author line on commits
+- Set per-repo: `git config user.name "Xoudusz" && git config user.email "da@w23.at"`
+'''
 
 
 def embed(text: str) -> list[float]:
@@ -216,6 +250,118 @@ def reindex_status() -> str:
     return "\n\n".join(lines)
 
 
+def _merge_onboarding(existing: str) -> str:
+    """Merge onboarding template with existing CLAUDE.md content."""
+    sections = {
+        "## MCP Setup": "## MCP Setup (if not connected)",
+        "## Cortex Tools": "## Cortex Tools",
+        "## Preferences": "## Preferences",
+    }
+
+    result = existing.rstrip()
+    added = []
+
+    # Check which sections already exist
+    for marker, full_header in sections.items():
+        if marker.lower() in existing.lower() or "cortex" in existing.lower() and "search_notes" in existing.lower():
+            continue  # Section exists, skip
+
+        # Find section in template
+        template_lines = ONBOARDING_TEMPLATE.split("\n")
+        in_section = False
+        section_content = []
+
+        for line in template_lines:
+            if line.startswith(full_header) or line.startswith(marker):
+                in_section = True
+                section_content.append(line)
+            elif in_section and line.startswith("## "):
+                break  # Next section started
+            elif in_section:
+                section_content.append(line)
+
+        if section_content:
+            added.append("\n".join(section_content).rstrip())
+
+    if not added:
+        return existing + "\n\n<!-- Cortex onboarding: all sections already present -->"
+
+    # Add Cortex header if not present
+    if "# cortex" not in existing.lower() and "## cortex" not in existing.lower():
+        result += "\n\n# Cortex Onboarding"
+
+    result += "\n\n" + "\n\n".join(added)
+    return result
+
+
+@mcp.tool()
+def get_onboarding(existing_content: str = "") -> str:
+    """Get onboarding instructions for CLAUDE.md.
+
+    Returns setup instructions, tool usage, and user preferences.
+
+    Args:
+        existing_content: If provided, merges with existing CLAUDE.md content,
+                         adding only missing sections. Pass empty string for
+                         full template.
+
+    Call this when:
+    - Starting a new project that should use Cortex
+    - User asks how to set up Cortex in a new repo
+    - User wants their preferences documented in a project
+
+    Usage:
+    1. Claude Code reads existing CLAUDE.md (if any)
+    2. Pass content to get_onboarding(existing_content=...)
+    3. Write merged result back to CLAUDE.md
+    """
+    if existing_content.strip():
+        return _merge_onboarding(existing_content)
+    return ONBOARDING_TEMPLATE
+
+
+@mcp.prompt()
+def onboarding() -> str:
+    """Set up Cortex and user preferences for this project.
+
+    Run /onboarding in any new project to configure:
+    - CLAUDE.md with Cortex tools + preferences
+    - Git user config
+    - Install missing tools (rtk, caveman)
+    """
+    return f"""Set up Cortex for this project. Execute this checklist:
+
+## 1. CLAUDE.md
+Read existing CLAUDE.md (if any). Merge with this config, avoiding duplicates:
+
+{ONBOARDING_TEMPLATE}
+
+Write merged result to CLAUDE.md.
+
+## 2. Git Config
+Run for this repo:
+```bash
+rtk git config user.name "Xoudusz" && rtk git config user.email "da@w23.at"
+```
+
+## 3. Check RTK
+Run `rtk --version`. If fails, install:
+```bash
+cargo install rtk
+```
+
+## 4. Check Caveman Skill
+Run `claude skill list`. If caveman missing:
+```bash
+claude skill add caveman:caveman
+```
+
+## 5. Verify Cortex
+Test connection: call `search_notes("test query")`. Should return results or "No results found."
+
+Report status of each step when done."""
+
+
 class _NotesHandler(FileSystemEventHandler):
     def __init__(self):
         self._timer: threading.Timer | None = None
@@ -248,10 +394,22 @@ class _APIKeyMiddleware:
             path = scope.get("path", "")
             # OAuth discovery probes (/.well-known/*, /sse/.well-known/*, /register) pass through
             # so clients get 404 and fall back to header auth. /health and /webhook have own auth.
+            # /ui allows query param auth (key=xxx) which JS stores in localStorage.
             unprotected = (
                 path in {"/health", "/webhook", "/register"}
                 or "/.well-known" in path
             )
+
+            # /ui: allow if query param has valid key (first access), then stored in localStorage
+            if path == "/ui":
+                query_string = scope.get("query_string", b"").decode()
+                params = dict(p.split("=", 1) for p in query_string.split("&") if "=" in p)
+                if params.get("key") == API_KEY:
+                    await self.app(scope, receive, send)
+                    return
+                # No key in URL — let it through, JS will use localStorage
+                unprotected = True
+
             if not unprotected:
                 headers = {k: v for k, v in scope.get("headers", [])}
                 key = headers.get(b"x-api-key", b"").decode()
@@ -306,6 +464,27 @@ def _start_watcher():
     log.info("[watcher] watching %s for .md changes (debounce %ds)", NOTES_PATH, WATCH_DEBOUNCE)
 
 
+# Web UI route handlers
+async def _ui_handler(request: Request):
+    return await ui(request)
+
+
+async def _api_search_handler(request: Request):
+    return await api_search(request, QDRANT_URL, embed)
+
+
+async def _api_status_handler(request: Request):
+    return await api_status(request, _reindex_state)
+
+
+async def _api_reindex_handler(request: Request):
+    return await api_reindex(request, _reindex_lock, _reindex_state, _run_reindex)
+
+
+async def _api_stats_handler(request: Request):
+    return await api_stats(request, QDRANT_URL, OLLAMA_URL)
+
+
 if __name__ == "__main__":
     threading.Thread(target=warmup, daemon=True).start()
     threading.Thread(target=_start_watcher, daemon=True).start()
@@ -313,6 +492,11 @@ if __name__ == "__main__":
     starlette_app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
         Route("/webhook", webhook, methods=["POST"]),
+        Route("/ui", _ui_handler, methods=["GET"]),
+        Route("/api/search", _api_search_handler, methods=["POST"]),
+        Route("/api/status", _api_status_handler, methods=["GET"]),
+        Route("/api/reindex", _api_reindex_handler, methods=["POST"]),
+        Route("/api/stats", _api_stats_handler, methods=["GET"]),
         Route("/.well-known/oauth-authorization-server", oauth_not_found),
         Route("/.well-known/openid-configuration", oauth_not_found),
         Route("/register", oauth_not_found, methods=["POST"]),

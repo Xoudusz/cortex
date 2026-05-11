@@ -10,11 +10,33 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 - Docker Compose — deployed on portainer LXC (192.168.68.103)
 - CI: push to main → GHCR image build → `ghcr.io/xoudusz/cortex-mcp:latest`
 
+## Web UI
+
+Dashboard at `/ui` for search and admin operations.
+
+**Access:**
+```
+https://cortex.hyvitech.org/ui?key=<api-key>
+```
+
+First access stores key in localStorage. Subsequent visits don't need key in URL.
+
+**Features:**
+- Search tab: query notes/code, toggle collections
+- Admin tab: trigger reindex, view status, collection stats
+
+**API endpoints:**
+- `POST /api/search` — `{"query": "...", "collections": ["notes","code"], "limit": 10}`
+- `GET /api/status` — reindex status
+- `POST /api/reindex` — `{"notes": true, "code": true, "repo": ""}`
+- `GET /api/stats` — collection counts + ollama status
+
 ## Structure
 
 ```
 mcp/
   server.py         # FastMCP SSE server — all tools + webhook + watcher
+  web_ui.py         # Web dashboard HTML + API routes
   requirements.txt
   Dockerfile        # build context is repo root (copies indexer/ scripts in)
 indexer/
@@ -27,8 +49,13 @@ docker-compose.yml  # ollama + qdrant + cortex-mcp
 
 - `search_notes(query, limit)` — semantic search over Obsidian notes
 - `search_code(query, limit)` — semantic search over source code
-- `reindex(notes, code)` — async, returns immediately
+- `reindex(notes, code, repo)` — async, returns immediately
 - `reindex_status()` — check progress of last reindex
+- `get_onboarding(existing_content?)` — returns setup instructions + preferences; pass existing CLAUDE.md content to merge
+
+## MCP prompts
+
+- `/onboarding` — full project setup: CLAUDE.md, git config, rtk, caveman skill, Cortex verification
 
 ## Key patterns
 

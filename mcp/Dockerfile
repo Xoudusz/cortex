@@ -3,6 +3,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 WORKDIR /app
 COPY mcp/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY mcp/server.py .
+COPY mcp/server.py mcp/web_ui.py .
 COPY indexer/index.py indexer/index_code.py .
 CMD ["python", "server.py"]
