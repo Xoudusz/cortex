@@ -14,6 +14,7 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
 from starlette.applications import Starlette
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
@@ -35,6 +36,7 @@ PORT            = int(os.environ.get("MCP_PORT", "8765"))
 NOTES_PATH      = os.environ.get("NOTES_PATH", "/notes")
 WATCH_DEBOUNCE  = int(os.environ.get("WATCH_DEBOUNCE", "60"))
 WEBHOOK_SECRET  = os.environ.get("WEBHOOK_SECRET", "")
+API_KEY         = os.environ.get("API_KEY", "")
 
 mcp = FastMCP("cortex", host=HOST, port=PORT)
 
@@ -238,6 +240,15 @@ class _NotesHandler(FileSystemEventHandler):
             threading.Thread(target=_run_reindex, args=(True, False, ""), daemon=True).start()
 
 
+class _APIKeyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if API_KEY and request.url.path not in {"/health", "/webhook"}:
+            if request.headers.get("X-API-Key") != API_KEY:
+                log.warning("[auth] rejected %s — missing or invalid X-API-Key", request.url.path)
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        return await call_next(request)
+
+
 async def health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
@@ -285,4 +296,5 @@ if __name__ == "__main__":
         Route("/webhook", webhook, methods=["POST"]),
         Mount("/", app=sse_app),
     ])
+    app.add_middleware(_APIKeyMiddleware)
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
