@@ -392,23 +392,16 @@ class _APIKeyMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and API_KEY:
             path = scope.get("path", "")
-            # OAuth discovery probes (/.well-known/*, /sse/.well-known/*, /register) pass through
-            # so clients get 404 and fall back to header auth. /health and /webhook have own auth.
-            # /ui allows query param auth (key=xxx) which JS stores in localStorage.
+            # Unprotected paths:
+            # - /health: healthchecks (no auth)
+            # - /webhook: GitHub webhooks (HMAC auth)
+            # - /register, /.well-known/*: OAuth discovery (404 fallback)
+            # - /, /api/*: Web UI + API (Authelia handles auth at proxy level)
             unprotected = (
-                path in {"/health", "/webhook", "/register"}
+                path in {"/health", "/webhook", "/register", "/"}
                 or "/.well-known" in path
+                or path.startswith("/api/")
             )
-
-            # /ui: allow if query param has valid key (first access), then stored in localStorage
-            if path == "/ui":
-                query_string = scope.get("query_string", b"").decode()
-                params = dict(p.split("=", 1) for p in query_string.split("&") if "=" in p)
-                if params.get("key") == API_KEY:
-                    await self.app(scope, receive, send)
-                    return
-                # No key in URL — let it through, JS will use localStorage
-                unprotected = True
 
             if not unprotected:
                 headers = {k: v for k, v in scope.get("headers", [])}
@@ -492,7 +485,7 @@ if __name__ == "__main__":
     starlette_app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
         Route("/webhook", webhook, methods=["POST"]),
-        Route("/ui", _ui_handler, methods=["GET"]),
+        Route("/", _ui_handler, methods=["GET"]),
         Route("/api/search", _api_search_handler, methods=["POST"]),
         Route("/api/status", _api_status_handler, methods=["GET"]),
         Route("/api/reindex", _api_reindex_handler, methods=["POST"]),
@@ -500,7 +493,7 @@ if __name__ == "__main__":
         Route("/.well-known/oauth-authorization-server", oauth_not_found),
         Route("/.well-known/openid-configuration", oauth_not_found),
         Route("/register", oauth_not_found, methods=["POST"]),
-        Mount("/", app=sse_app),
+        Mount("/sse", app=sse_app),
     ])
     app = _APIKeyMiddleware(starlette_app)
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")

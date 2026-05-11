@@ -261,20 +261,11 @@ UI_HTML = """<!DOCTYPE html>
     </div>
 
     <script>
-        const API_KEY = localStorage.getItem('cortex_api_key') || new URLSearchParams(location.search).get('key');
-        if (API_KEY) {
-            localStorage.setItem('cortex_api_key', API_KEY);
-            if (location.search.includes('key=')) {
-                history.replaceState(null, '', location.pathname);
-            }
-        }
-
         async function api(path, options = {}) {
             const res = await fetch(path, {
                 ...options,
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-API-Key': API_KEY || '',
                     ...options.headers
                 }
             });

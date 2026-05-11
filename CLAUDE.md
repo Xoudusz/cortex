@@ -12,24 +12,29 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 
 ## Web UI
 
-Dashboard at `/ui` for search and admin operations.
+Dashboard at `/` for search and admin operations.
 
 **Access:**
 ```
-https://cortex.hyvitech.org/ui?key=<api-key>
+https://cortex.hyvitech.org/
 ```
 
-First access stores key in localStorage. Subsequent visits don't need key in URL.
+Auth handled by Authelia at NPM proxy level. No in-app auth required.
 
 **Features:**
 - Search tab: query notes/code, toggle collections
 - Admin tab: trigger reindex, view status, collection stats
 
-**API endpoints:**
+**API endpoints (Authelia-protected):**
 - `POST /api/search` — `{"query": "...", "collections": ["notes","code"], "limit": 10}`
 - `GET /api/status` — reindex status
 - `POST /api/reindex` — `{"notes": true, "code": true, "repo": ""}`
 - `GET /api/stats` — collection counts + ollama status
+
+**Unprotected endpoints:**
+- `GET /health` — healthchecks
+- `POST /webhook` — GitHub webhooks (HMAC auth)
+- `/sse` — MCP SSE (X-API-Key header)
 
 ## Structure
 
