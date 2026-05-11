@@ -267,6 +267,11 @@ async def health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+async def oauth_not_found(request: Request) -> JSONResponse:
+    """Return JSON 404 for OAuth discovery paths so MCP clients parse cleanly."""
+    return JSONResponse({"error": "not_found", "error_description": "OAuth not supported"}, status_code=404)
+
+
 async def webhook(request: Request) -> JSONResponse:
     body = await request.body()
     if WEBHOOK_SECRET:
@@ -308,6 +313,9 @@ if __name__ == "__main__":
     starlette_app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
         Route("/webhook", webhook, methods=["POST"]),
+        Route("/.well-known/oauth-authorization-server", oauth_not_found),
+        Route("/.well-known/openid-configuration", oauth_not_found),
+        Route("/register", oauth_not_found, methods=["POST"]),
         Mount("/", app=sse_app),
     ])
     app = _APIKeyMiddleware(starlette_app)
