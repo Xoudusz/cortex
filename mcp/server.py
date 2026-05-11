@@ -14,7 +14,6 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
 from starlette.applications import Starlette
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
@@ -240,13 +239,22 @@ class _NotesHandler(FileSystemEventHandler):
             threading.Thread(target=_run_reindex, args=(True, False, ""), daemon=True).start()
 
 
-class _APIKeyMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if API_KEY and request.url.path not in {"/health", "/webhook"}:
-            if request.headers.get("X-API-Key") != API_KEY:
-                log.warning("[auth] rejected %s — missing or invalid X-API-Key", request.url.path)
-                return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        return await call_next(request)
+class _APIKeyMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and API_KEY:
+            path = scope.get("path", "")
+            if path not in {"/health", "/webhook"}:
+                headers = {k: v for k, v in scope.get("headers", [])}
+                key = headers.get(b"x-api-key", b"").decode()
+                if key != API_KEY:
+                    log.warning("[auth] rejected %s — missing or invalid X-API-Key", path)
+                    response = JSONResponse({"error": "Unauthorized"}, status_code=401)
+                    await response(scope, receive, send)
+                    return
+        await self.app(scope, receive, send)
 
 
 async def health(request: Request) -> JSONResponse:
@@ -291,10 +299,10 @@ if __name__ == "__main__":
     threading.Thread(target=warmup, daemon=True).start()
     threading.Thread(target=_start_watcher, daemon=True).start()
     sse_app = mcp.sse_app()
-    app = Starlette(routes=[
+    starlette_app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
         Route("/webhook", webhook, methods=["POST"]),
         Mount("/", app=sse_app),
     ])
-    app.add_middleware(_APIKeyMiddleware)
+    app = _APIKeyMiddleware(starlette_app)
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
