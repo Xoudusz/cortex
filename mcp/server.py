@@ -478,13 +478,8 @@ async def _api_stats_handler(request: Request):
     return await api_stats(request, QDRANT_URL, OLLAMA_URL)
 
 
-if __name__ == "__main__":
-    threading.Thread(target=warmup, daemon=True).start()
-    threading.Thread(target=_start_watcher, daemon=True).start()
-    sse_app = mcp.sse_app()
-    
 class _NormalizeSSEPath:
-    """Rewrite /sse → /sse/ in ASGI scope so Starlette never issues a redirect."""
+    """Rewrite /sse to /sse/ in ASGI scope so Starlette Mount never issues 307 redirect."""
     def __init__(self, app): self.app = app
     async def __call__(self, scope, receive, send):
         if scope.get('type') == 'http' and scope.get('path') == '/sse':
@@ -492,7 +487,12 @@ class _NormalizeSSEPath:
             scope['path'] = '/sse/'
         await self.app(scope, receive, send)
 
-starlette_app = Starlette(routes=[
+
+if __name__ == "__main__":
+    threading.Thread(target=warmup, daemon=True).start()
+    threading.Thread(target=_start_watcher, daemon=True).start()
+    sse_app = mcp.sse_app()
+    starlette_app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
         Route("/webhook", webhook, methods=["POST"]),
         Route("/", _ui_handler, methods=["GET"]),
@@ -505,5 +505,5 @@ starlette_app = Starlette(routes=[
         Route("/register", oauth_not_found, methods=["POST"]),
         Mount("/sse", app=sse_app),
     ])
-    app = _APIKeyMiddleware(starlette_app)
+    app = _NormalizeSSEPath(_APIKeyMiddleware(starlette_app))
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
