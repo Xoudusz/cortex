@@ -482,7 +482,17 @@ if __name__ == "__main__":
     threading.Thread(target=warmup, daemon=True).start()
     threading.Thread(target=_start_watcher, daemon=True).start()
     sse_app = mcp.sse_app()
-    starlette_app = Starlette(redirect_slashes=False, routes=[
+    
+class _NormalizeSSEPath:
+    """Rewrite /sse → /sse/ in ASGI scope so Starlette never issues a redirect."""
+    def __init__(self, app): self.app = app
+    async def __call__(self, scope, receive, send):
+        if scope.get('type') == 'http' and scope.get('path') == '/sse':
+            scope = dict(scope)
+            scope['path'] = '/sse/'
+        await self.app(scope, receive, send)
+
+starlette_app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
         Route("/webhook", webhook, methods=["POST"]),
         Route("/", _ui_handler, methods=["GET"]),
