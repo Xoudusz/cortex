@@ -482,7 +482,7 @@ if __name__ == "__main__":
     threading.Thread(target=warmup, daemon=True).start()
     threading.Thread(target=_start_watcher, daemon=True).start()
     sse_app = mcp.sse_app()
-    starlette_app = Starlette(routes=[
+    starlette_app = Starlette(redirect_slashes=False, routes=[
         Route("/health", health, methods=["GET"]),
         Route("/webhook", webhook, methods=["POST"]),
         Route("/", _ui_handler, methods=["GET"]),
