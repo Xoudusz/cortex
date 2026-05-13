@@ -26,6 +26,7 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - QDRANT_URL=http://qdrant:6333
       - NOTES_PATH=/notes
+      - API_KEY=${API_KEY:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
     volumes:

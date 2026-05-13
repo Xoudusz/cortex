@@ -5,7 +5,7 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 ## Services
 
 | Service | Port | Description |
-|---------|------|-------------|
+|---------|------|-------------| 
 | Ollama | 11434 | Embeddings via `nomic-embed-text` |
 | Qdrant | 6333 | Vector store — collections: `notes`, `code` |
 | cortex-mcp | 8765 | MCP SSE server for Claude Code |
@@ -14,7 +14,8 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 
 | Path | Method | Description |
 |------|--------|-------------|
-| `/sse` | GET | MCP SSE endpoint (requires `x-api-key` header) |
+| `/` | GET | Web UI (Authelia protected) |
+| `/sse` | GET | MCP SSE endpoint (requires `x-api-key` header; internally rewritten to `/sse/sse` via ASGI middleware) |
 | `/health` | GET | Health check for autoheal |
 | `/webhook` | POST | GitHub push webhook — triggers per-repo code reindex |
 
@@ -24,7 +25,8 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 2. URL: `https://github.com/Xoudusz/cortex`
 3. Auth: `Xoudusz` / PAT (Contents: Read)
 4. Compose path: `docker-compose.yml`
-5. Deploy
+5. Set `API_KEY` env var in Portainer stack settings
+6. Deploy
 
 **Post-deploy — pull embedding model:**
 ```bash
@@ -47,7 +49,7 @@ claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse \
 ## Environment variables
 
 | Var | Default | Purpose |
-|-----|---------|---------|
+|-----|---------|---------| 
 | `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant endpoint |
 | `NOTES_PATH` | `/notes` | Notes mount path (watched for changes) |
