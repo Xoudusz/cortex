@@ -479,12 +479,12 @@ async def _api_stats_handler(request: Request):
 
 
 class _NormalizeSSEPath:
-    """Rewrite /sse to /sse/ in ASGI scope so Starlette Mount never issues 307 redirect."""
+    """Rewrite /sse to /sse/sse — FastMCP mounts handler at /sse internally, Mount("/sse") adds outer layer."""
     def __init__(self, app): self.app = app
     async def __call__(self, scope, receive, send):
         if scope.get('type') == 'http' and scope.get('path') == '/sse':
             scope = dict(scope)
-            scope['path'] = '/sse/'
+            scope['path'] = '/sse/sse'
         await self.app(scope, receive, send)
 
 
