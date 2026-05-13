@@ -53,7 +53,7 @@ claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse \\
 Use PROACTIVELY — search before asking user for context.
 
 - `search_notes(query)` — Obsidian vault (projects, plans, server config, decisions)
-- `search_code(query)` — repos: weakness-dex, mtgdle, tower-of-evolon, tower-of-evolon-backend, svelte-radio, cortex
+- `search_code(query)` — repos: weakness-dex, mtgdle, tower-of-evolon, tower-of-evolon-backend, svelte-radio, cortex, riftracoons
 - `reindex(notes, code, repo)` — refresh vectors if stale
 - `reindex_status()` — check progress
 
@@ -129,7 +129,7 @@ def search_notes(query: str, limit: int = 5) -> str:
 def search_code(query: str, limit: int = 5) -> str:
     """Search source code across the user's active repos semantically.
 
-    Indexed repos: weakness-dex, mtgdle, tower-of-evolon, tower-of-evolon-backend, svelte-radio, cortex.
+    Indexed repos: weakness-dex, mtgdle, tower-of-evolon, tower-of-evolon-backend, svelte-radio, cortex, riftracoons.
 
     Call this proactively whenever:
     - Implementing a feature that touches one of these repos
