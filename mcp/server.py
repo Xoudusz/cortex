@@ -38,6 +38,37 @@ NOTES_PATH      = os.environ.get("NOTES_PATH", "/notes")
 WATCH_DEBOUNCE  = int(os.environ.get("WATCH_DEBOUNCE", "60"))
 WEBHOOK_SECRET  = os.environ.get("WEBHOOK_SECRET", "")
 API_KEY         = os.environ.get("API_KEY", "")
+GITHUB_TOKEN    = os.environ.get("GITHUB_TOKEN", "")
+REPOS_CONFIG    = os.environ.get("REPOS_CONFIG", "/app/data/repos.json")
+
+DEFAULT_REPOS = [
+    "Xoudusz/weakness-dex",
+    "Xoudusz/mtgdle",
+    "Xoudusz/tower-of-evolon",
+    "Xoudusz/tower-of-evolon-backend",
+    "Xoudusz/svelte-radio",
+    "Xoudusz/cortex",
+    "Xoudusz/riftracoons-web",
+]
+
+
+def _load_repos() -> list[str]:
+    try:
+        if os.path.exists(REPOS_CONFIG):
+            with open(REPOS_CONFIG) as f:
+                data = json.load(f)
+            if isinstance(data, list) and data:
+                return data
+    except Exception:
+        pass
+    return list(DEFAULT_REPOS)
+
+
+def _save_repos(repos: list[str]) -> None:
+    os.makedirs(os.path.dirname(REPOS_CONFIG) or ".", exist_ok=True)
+    with open(REPOS_CONFIG, "w") as f:
+        json.dump(repos, f, indent=2)
+
 
 mcp = FastMCP("cortex", host=HOST, port=PORT)
 
@@ -261,12 +292,10 @@ def _merge_onboarding(existing: str) -> str:
     result = existing.rstrip()
     added = []
 
-    # Check which sections already exist
     for marker, full_header in sections.items():
         if marker.lower() in existing.lower() or "cortex" in existing.lower() and "search_notes" in existing.lower():
-            continue  # Section exists, skip
+            continue
 
-        # Find section in template
         template_lines = ONBOARDING_TEMPLATE.split("\n")
         in_section = False
         section_content = []
@@ -276,7 +305,7 @@ def _merge_onboarding(existing: str) -> str:
                 in_section = True
                 section_content.append(line)
             elif in_section and line.startswith("## "):
-                break  # Next section started
+                break
             elif in_section:
                 section_content.append(line)
 
@@ -286,7 +315,6 @@ def _merge_onboarding(existing: str) -> str:
     if not added:
         return existing + "\n\n<!-- Cortex onboarding: all sections already present -->"
 
-    # Add Cortex header if not present
     if "# cortex" not in existing.lower() and "## cortex" not in existing.lower():
         result += "\n\n# Cortex Onboarding"
 
@@ -392,11 +420,6 @@ class _APIKeyMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and API_KEY:
             path = scope.get("path", "")
-            # Unprotected paths:
-            # - /health: healthchecks (no auth)
-            # - /webhook: GitHub webhooks (HMAC auth)
-            # - /register, /.well-known/*: OAuth discovery (404 fallback)
-            # - /, /api/*: Web UI + API (Authelia handles auth at proxy level)
             unprotected = (
                 path in {"/health", "/webhook", "/register", "/"}
                 or "/.well-known" in path
@@ -419,7 +442,6 @@ async def health(request: Request) -> JSONResponse:
 
 
 async def oauth_not_found(request: Request) -> JSONResponse:
-    """Return JSON 404 for OAuth discovery paths so MCP clients parse cleanly."""
     return JSONResponse({"error": "not_found", "error_description": "OAuth not supported"}, status_code=404)
 
 
@@ -478,8 +500,51 @@ async def _api_stats_handler(request: Request):
     return await api_stats(request, QDRANT_URL, OLLAMA_URL)
 
 
+# Repos management handlers
+async def _api_repos_handler(request: Request) -> JSONResponse:
+    if request.method == "GET":
+        return JSONResponse({"repos": _load_repos()})
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    repo = body.get("repo", "").strip()
+    if not repo or "/" not in repo:
+        return JSONResponse({"error": "Use owner/name format (e.g. Xoudusz/my-repo)"}, status_code=400)
+    repos = _load_repos()
+    if repo not in repos:
+        repos.append(repo)
+        _save_repos(repos)
+    return JSONResponse({"repos": repos})
+
+
+async def _api_repos_delete(request: Request) -> JSONResponse:
+    repo = request.path_params.get("repo", "")
+    repos = [r for r in _load_repos() if r != repo]
+    _save_repos(repos)
+    log.info("[repos] removed %s", repo)
+    return JSONResponse({"repos": repos})
+
+
+async def _api_github_repos(request: Request) -> JSONResponse:
+    if not GITHUB_TOKEN:
+        return JSONResponse({"error": "GITHUB_TOKEN not configured"}, status_code=503)
+    try:
+        resp = httpx.get(
+            "https://api.github.com/user/repos",
+            headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"},
+            params={"per_page": 100, "sort": "updated", "affiliation": "owner"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        repos = [r["full_name"] for r in resp.json() if not r.get("archived")]
+        return JSONResponse({"repos": repos})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 class _NormalizeSSEPath:
-    """Rewrite /sse to /sse/sse — FastMCP mounts handler at /sse internally, Mount("/sse") adds outer layer."""
+    """Rewrite /sse to /sse/sse — FastMCP mounts handler at /sse internally."""
     def __init__(self, app): self.app = app
     async def __call__(self, scope, receive, send):
         if scope.get('type') == 'http' and scope.get('path') == '/sse':
@@ -500,6 +565,9 @@ if __name__ == "__main__":
         Route("/api/status", _api_status_handler, methods=["GET"]),
         Route("/api/reindex", _api_reindex_handler, methods=["POST"]),
         Route("/api/stats", _api_stats_handler, methods=["GET"]),
+        Route("/api/repos", _api_repos_handler, methods=["GET", "POST"]),
+        Route("/api/repos/{repo:path}", _api_repos_delete, methods=["DELETE"]),
+        Route("/api/github/repos", _api_github_repos, methods=["GET"]),
         Route("/.well-known/oauth-authorization-server", oauth_not_found),
         Route("/.well-known/openid-configuration", oauth_not_found),
         Route("/register", oauth_not_found, methods=["POST"]),
