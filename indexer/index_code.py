@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -14,6 +15,7 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 REPOS_DIR      = Path(os.environ.get("REPOS_DIR", "/tmp/repos"))
 OLLAMA_URL     = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 QDRANT_URL     = os.environ.get("QDRANT_URL", "http://qdrant:6333")
+REPOS_CONFIG   = os.environ.get("REPOS_CONFIG", "/app/data/repos.json")
 COLLECTION     = "code"
 EMBED_MODEL    = "nomic-embed-text"
 VECTOR_SIZE    = 768
@@ -32,15 +34,29 @@ LANG_MAP  = {
     ".kt": "kotlin", ".kts": "kotlin", ".gd": "gdscript",
 }
 
-ALL_REPOS = [
+DEFAULT_REPOS = [
     "Xoudusz/weakness-dex",
     "Xoudusz/mtgdle",
     "Xoudusz/tower-of-evolon",
     "Xoudusz/tower-of-evolon-backend",
     "Xoudusz/svelte-radio",
     "Xoudusz/cortex",
-    "Xoudusz/riftracoons",
+    "Xoudusz/riftracoons-web",
 ]
+
+
+def _load_repos() -> list[str]:
+    """Load repos from config file, fall back to DEFAULT_REPOS."""
+    try:
+        if os.path.exists(REPOS_CONFIG):
+            with open(REPOS_CONFIG) as f:
+                data = json.load(f)
+            if isinstance(data, list) and data:
+                return data
+    except Exception as e:
+        print(f"Warning: could not read repos config {REPOS_CONFIG}: {e}")
+    return list(DEFAULT_REPOS)
+
 
 # --- tree-sitter setup (graceful fallback to sliding window if unavailable) ---
 try:
@@ -175,13 +191,14 @@ def main():
     parser.add_argument("--repo", default="", help="Only index this repo name (e.g. svelte-radio)")
     args = parser.parse_args()
 
+    all_repos = _load_repos()
     if args.repo:
-        repos = [r for r in ALL_REPOS if r.split("/")[1] == args.repo]
+        repos = [r for r in all_repos if r.split("/")[1] == args.repo]
         if not repos:
-            print(f"Unknown repo: {args.repo}. Valid: {[r.split('/')[1] for r in ALL_REPOS]}")
+            print(f"Unknown repo: {args.repo}. Valid: {[r.split('/')[1] for r in all_repos]}")
             return
     else:
-        repos = ALL_REPOS
+        repos = all_repos
 
     REPOS_DIR.mkdir(parents=True, exist_ok=True)
     client = QdrantClient(url=QDRANT_URL)
