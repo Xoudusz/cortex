@@ -57,11 +57,7 @@ UI_HTML = """<!DOCTYPE html>
         .panel { display: none; }
         .panel.active { display: block; }
 
-        .search-form {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-        }
+        .search-form { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
         input[type="text"] {
             flex: 1;
             padding: 0.75rem 1rem;
@@ -73,6 +69,19 @@ UI_HTML = """<!DOCTYPE html>
         }
         input[type="text"]:focus { outline: none; border-color: var(--accent); }
         input[type="text"]::placeholder { color: var(--text-muted); }
+
+        select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+        }
+        select:focus { outline: none; border-color: var(--accent); }
 
         button {
             padding: 0.75rem 1.25rem;
@@ -91,20 +100,17 @@ UI_HTML = """<!DOCTYPE html>
             border: 1px solid var(--border);
             color: var(--text);
         }
-        button.secondary:hover { border-color: var(--accent); }
+        button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+        button.small { padding: 0.375rem 0.75rem; font-size: 0.75rem; }
+        button.danger {
+            background: rgba(248, 81, 73, 0.12);
+            border: 1px solid rgba(248, 81, 73, 0.3);
+            color: var(--error);
+        }
+        button.danger:hover { background: rgba(248, 81, 73, 0.22); }
 
-        .toggles {
-            display: flex;
-            gap: 1rem;
-            margin-bottom: 1rem;
-        }
-        .toggle {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            font-size: 0.875rem;
-            color: var(--text-muted);
-        }
+        .toggles { display: flex; gap: 1rem; margin-bottom: 1rem; }
+        .toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text-muted); }
         .toggle input { accent-color: var(--accent); }
 
         .results { display: flex; flex-direction: column; gap: 0.75rem; }
@@ -114,23 +120,9 @@ UI_HTML = """<!DOCTYPE html>
             border-radius: 8px;
             padding: 1rem;
         }
-        .result-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 0.5rem;
-        }
-        .result-title {
-            font-weight: 600;
-            font-size: 0.875rem;
-            color: var(--accent);
-            word-break: break-all;
-        }
-        .result-meta {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            text-align: right;
-        }
+        .result-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem; }
+        .result-title { font-weight: 600; font-size: 0.875rem; color: var(--accent); word-break: break-all; }
+        .result-meta { font-size: 0.75rem; color: var(--text-muted); text-align: right; }
         .result-content {
             font-size: 0.8125rem;
             color: var(--text-muted);
@@ -142,19 +134,8 @@ UI_HTML = """<!DOCTYPE html>
             border-radius: 4px;
             font-family: 'SF Mono', Consolas, monospace;
         }
-        .result-tags {
-            margin-top: 0.5rem;
-            display: flex;
-            gap: 0.25rem;
-            flex-wrap: wrap;
-        }
-        .tag {
-            background: var(--bg);
-            padding: 0.125rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            color: var(--text-muted);
-        }
+        .result-tags { margin-top: 0.5rem; display: flex; gap: 0.25rem; flex-wrap: wrap; }
+        .tag { background: var(--bg); padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.75rem; color: var(--text-muted); }
 
         .stats-grid {
             display: grid;
@@ -162,12 +143,7 @@ UI_HTML = """<!DOCTYPE html>
             gap: 1rem;
             margin-bottom: 1.5rem;
         }
-        .stat-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem;
-        }
+        .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
         .stat-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; }
         .stat-value { font-size: 1.5rem; font-weight: 600; }
         .stat-value.ok { color: var(--success); }
@@ -189,6 +165,21 @@ UI_HTML = """<!DOCTYPE html>
         }
         .status-running { border-color: var(--accent); }
 
+        .repo-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+        }
+        .repo-name { font-size: 0.875rem; font-family: 'SF Mono', Consolas, monospace; }
+        .repo-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+        .add-repo-section { margin-top: 1.5rem; }
+        .add-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+
         .message {
             padding: 0.75rem 1rem;
             border-radius: 6px;
@@ -200,7 +191,6 @@ UI_HTML = """<!DOCTYPE html>
 
         .empty { color: var(--text-muted); font-style: italic; }
         .loading { opacity: 0.6; }
-
         a { color: var(--accent); text-decoration: none; }
         a:hover { text-decoration: underline; }
     </style>
@@ -211,9 +201,11 @@ UI_HTML = """<!DOCTYPE html>
 
         <div class="tabs">
             <button class="tab active" data-tab="search">Search</button>
+            <button class="tab" data-tab="repos">Repos</button>
             <button class="tab" data-tab="admin">Admin</button>
         </div>
 
+        <!-- Search -->
         <div id="search-panel" class="panel active">
             <form class="search-form" id="search-form">
                 <input type="text" id="query" placeholder="Search notes and code..." autofocus>
@@ -232,6 +224,27 @@ UI_HTML = """<!DOCTYPE html>
             <div id="search-results" class="results"></div>
         </div>
 
+        <!-- Repos -->
+        <div id="repos-panel" class="panel">
+            <div id="repo-list"></div>
+            <div class="add-repo-section">
+                <h3 style="margin-bottom: 0.75rem; font-size: 1rem;">Add Repo</h3>
+                <div class="add-row">
+                    <input type="text" id="repo-input" placeholder="Xoudusz/repo-name">
+                    <button id="repo-add-btn">Add</button>
+                </div>
+                <button class="secondary" id="load-github-repos-btn">Load from GitHub</button>
+                <div id="github-repo-picker" style="display: none; margin-top: 0.75rem;">
+                    <select id="github-repo-select">
+                        <option value="">Select a repo...</option>
+                    </select>
+                    <button id="github-repo-add-btn">Add Selected</button>
+                </div>
+                <div id="repo-message" style="margin-top: 0.75rem;"></div>
+            </div>
+        </div>
+
+        <!-- Admin -->
         <div id="admin-panel" class="panel">
             <div class="stats-grid" id="stats-grid">
                 <div class="stat-card">
@@ -247,7 +260,6 @@ UI_HTML = """<!DOCTYPE html>
                     <div class="stat-value" id="stat-ollama">—</div>
                 </div>
             </div>
-
             <div class="reindex-section">
                 <h3 style="margin-bottom: 0.75rem; font-size: 1rem;">Reindex</h3>
                 <div class="reindex-buttons">
@@ -264,16 +276,17 @@ UI_HTML = """<!DOCTYPE html>
         async function api(path, options = {}) {
             const res = await fetch(path, {
                 ...options,
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                }
+                headers: { 'Content-Type': 'application/json', ...options.headers }
             });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({ error: res.statusText }));
                 throw new Error(err.error || res.statusText);
             }
             return res.json();
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
         // Tabs
@@ -284,6 +297,7 @@ UI_HTML = """<!DOCTYPE html>
                 tab.classList.add('active');
                 document.getElementById(tab.dataset.tab + '-panel').classList.add('active');
                 if (tab.dataset.tab === 'admin') loadStats();
+                if (tab.dataset.tab === 'repos') loadRepos();
             });
         });
 
@@ -313,7 +327,7 @@ UI_HTML = """<!DOCTYPE html>
                 });
                 renderResults(data);
             } catch (err) {
-                resultsDiv.innerHTML = '<div class="message error">' + err.message + '</div>';
+                resultsDiv.innerHTML = '<div class="message error">' + escapeHtml(err.message) + '</div>';
             }
         });
 
@@ -323,37 +337,30 @@ UI_HTML = """<!DOCTYPE html>
                 ...(data.code || []).map(r => ({ ...r, type: 'code' }))
             ].sort((a, b) => b.score - a.score);
 
-            if (!all.length) {
-                resultsDiv.innerHTML = '<div class="empty">No results found.</div>';
-                return;
-            }
+            if (!all.length) { resultsDiv.innerHTML = '<div class="empty">No results found.</div>'; return; }
 
             resultsDiv.innerHTML = all.map(r => {
                 if (r.type === 'note') {
-                    const tags = (r.tags || []).map(t => '<span class="tag">' + t + '</span>').join('');
+                    const tags = (r.tags || []).map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('');
                     return '<div class="result-card">' +
                         '<div class="result-header">' +
-                        '<div class="result-title">' + r.file + ' › ' + r.heading + '</div>' +
+                        '<div class="result-title">' + escapeHtml(r.file) + ' › ' + escapeHtml(r.heading) + '</div>' +
                         '<div class="result-meta">score: ' + r.score.toFixed(3) + '</div>' +
                         '</div>' +
                         '<div class="result-content">' + escapeHtml(r.text) + '</div>' +
                         (tags ? '<div class="result-tags">' + tags + '</div>' : '') +
                         '</div>';
                 } else {
-                    const link = r.github_url ? '<a href="' + r.github_url + '" target="_blank">GitHub</a>' : '';
+                    const link = r.github_url ? '<a href="' + escapeHtml(r.github_url) + '" target="_blank">GitHub</a>' : '';
                     return '<div class="result-card">' +
                         '<div class="result-header">' +
-                        '<div class="result-title">' + r.repo + '/' + r.file + ':' + r.start_line + '-' + r.end_line + '</div>' +
-                        '<div class="result-meta">' + (r.language || '') + ' • score: ' + r.score.toFixed(3) + (link ? ' • ' + link : '') + '</div>' +
+                        '<div class="result-title">' + escapeHtml(r.repo) + '/' + escapeHtml(r.file) + ':' + r.start_line + '-' + r.end_line + '</div>' +
+                        '<div class="result-meta">' + escapeHtml(r.language || '') + ' • score: ' + r.score.toFixed(3) + (link ? ' • ' + link : '') + '</div>' +
                         '</div>' +
                         '<div class="result-content">' + escapeHtml(r.text) + '</div>' +
                         '</div>';
                 }
             }).join('');
-        }
-
-        function escapeHtml(str) {
-            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
         // Stats
@@ -365,27 +372,22 @@ UI_HTML = """<!DOCTYPE html>
                 const ollama = document.getElementById('stat-ollama');
                 ollama.textContent = data.ollama?.status || 'error';
                 ollama.className = 'stat-value ' + (data.ollama?.status === 'ok' ? 'ok' : 'error');
-            } catch (err) {
-                console.error('Failed to load stats:', err);
-            }
+            } catch (err) { console.error('Failed to load stats:', err); }
         }
 
         // Reindex
         let statusPoll = null;
-
         document.getElementById('reindex-all').addEventListener('click', () => triggerReindex(true, true));
         document.getElementById('reindex-notes').addEventListener('click', () => triggerReindex(true, false));
         document.getElementById('reindex-code').addEventListener('click', () => triggerReindex(false, true));
 
-        async function triggerReindex(notes, code) {
+        async function triggerReindex(notes, code, repo) {
             try {
                 const data = await api('/api/reindex', {
                     method: 'POST',
-                    body: JSON.stringify({ notes, code, repo: '' })
+                    body: JSON.stringify({ notes, code, repo: repo || '' })
                 });
-                if (data.status === 'started' || data.status === 'already_running') {
-                    pollStatus();
-                }
+                if (data.status === 'started' || data.status === 'already_running') pollStatus();
             } catch (err) {
                 document.getElementById('reindex-status').textContent = 'Error: ' + err.message;
             }
@@ -404,7 +406,6 @@ UI_HTML = """<!DOCTYPE html>
                     if (data.error) text += '\\n\\nError: ' + data.error;
                     statusDiv.textContent = text;
                     statusDiv.scrollTop = statusDiv.scrollHeight;
-
                     if (data.done && !data.running) {
                         clearInterval(statusPoll);
                         statusPoll = null;
@@ -415,32 +416,140 @@ UI_HTML = """<!DOCTYPE html>
                     statusDiv.textContent = 'Error polling status: ' + err.message;
                 }
             };
-
             await update();
             statusPoll = setInterval(update, 2000);
         }
 
-        // Initial status check
         api('/api/status').then(data => {
             if (data.running) pollStatus();
             else if (data.done) {
-                let text = 'Last run: ' + (data.running ? 'running' : 'done') + ' (' + Math.round(data.elapsed_seconds) + 's)\\n\\n';
+                let text = 'Last run: done (' + Math.round(data.elapsed_seconds) + 's)\\n\\n';
                 text += (data.output || []).join('\\n');
                 document.getElementById('reindex-status').textContent = text;
             }
         }).catch(() => {});
+
+        // Repos
+        async function loadRepos() {
+            const listDiv = document.getElementById('repo-list');
+            listDiv.innerHTML = '<div class="empty loading">Loading...</div>';
+            try {
+                const data = await api('/api/repos');
+                renderRepos(data.repos || []);
+            } catch (err) {
+                listDiv.innerHTML = '<div class="message error">' + escapeHtml(err.message) + '</div>';
+            }
+        }
+
+        function renderRepos(repos) {
+            const listDiv = document.getElementById('repo-list');
+            if (!repos.length) {
+                listDiv.innerHTML = '<div class="empty">No repos configured.</div>';
+                return;
+            }
+            listDiv.innerHTML = repos.map(repo =>
+                '<div class="repo-item" data-repo="' + escapeHtml(repo) + '">' +
+                '<span class="repo-name">' + escapeHtml(repo) + '</span>' +
+                '<div class="repo-actions">' +
+                '<button class="secondary small repo-reindex-btn">Reindex</button>' +
+                '<button class="danger small repo-remove-btn">Remove</button>' +
+                '</div></div>'
+            ).join('');
+
+            listDiv.querySelectorAll('.repo-reindex-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const repo = btn.closest('.repo-item').dataset.repo;
+                    const name = repo.split('/')[1];
+                    btn.disabled = true;
+                    btn.textContent = '...';
+                    try {
+                        await triggerReindex(false, true, name);
+                        showRepoMsg('Reindexing ' + name + '… check Admin tab.', 'info');
+                    } catch (err) {
+                        showRepoMsg(err.message, 'error');
+                    } finally {
+                        btn.disabled = false;
+                        btn.textContent = 'Reindex';
+                    }
+                });
+            });
+
+            listDiv.querySelectorAll('.repo-remove-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const repo = btn.closest('.repo-item').dataset.repo;
+                    try {
+                        const data = await api('/api/repos/' + encodeURIComponent(repo), { method: 'DELETE' });
+                        renderRepos(data.repos || []);
+                        showRepoMsg('Removed ' + repo, 'info');
+                    } catch (err) {
+                        showRepoMsg(err.message, 'error');
+                    }
+                });
+            });
+        }
+
+        function showRepoMsg(msg, type) {
+            const div = document.getElementById('repo-message');
+            div.innerHTML = '<div class="message ' + type + '">' + escapeHtml(msg) + '</div>';
+            setTimeout(() => { div.innerHTML = ''; }, 4000);
+        }
+
+        document.getElementById('repo-add-btn').addEventListener('click', async () => {
+            const val = document.getElementById('repo-input').value.trim();
+            if (!val) return;
+            try {
+                const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo: val }) });
+                document.getElementById('repo-input').value = '';
+                renderRepos(data.repos || []);
+                showRepoMsg('Added ' + val, 'info');
+            } catch (err) {
+                showRepoMsg(err.message, 'error');
+            }
+        });
+
+        document.getElementById('repo-input').addEventListener('keydown', e => {
+            if (e.key === 'Enter') document.getElementById('repo-add-btn').click();
+        });
+
+        document.getElementById('load-github-repos-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('load-github-repos-btn');
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+            try {
+                const data = await api('/api/github/repos');
+                const select = document.getElementById('github-repo-select');
+                select.innerHTML = '<option value="">Select a repo...</option>' +
+                    (data.repos || []).map(r => '<option value="' + escapeHtml(r) + '">' + escapeHtml(r) + '</option>').join('');
+                document.getElementById('github-repo-picker').style.display = 'block';
+            } catch (err) {
+                showRepoMsg(err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Load from GitHub';
+            }
+        });
+
+        document.getElementById('github-repo-add-btn').addEventListener('click', async () => {
+            const val = document.getElementById('github-repo-select').value;
+            if (!val) return;
+            try {
+                const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo: val }) });
+                renderRepos(data.repos || []);
+                showRepoMsg('Added ' + val, 'info');
+            } catch (err) {
+                showRepoMsg(err.message, 'error');
+            }
+        });
     </script>
 </body>
 </html>"""
 
 
 async def ui(request: Request) -> HTMLResponse:
-    """Serve the web UI."""
     return HTMLResponse(UI_HTML)
 
 
 async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONResponse:
-    """Search notes and/or code collections."""
     try:
         body = await request.json()
     except Exception:
@@ -498,32 +607,22 @@ async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONRespons
 
 
 async def api_status(request: Request, reindex_state: dict) -> JSONResponse:
-    """Get reindex status."""
     import time
     s = reindex_state
     if s["started_at"] is None:
-        return JSONResponse({
-            "running": False,
-            "elapsed_seconds": 0,
-            "output": [],
-            "error": None,
-            "done": False
-        })
-
+        return JSONResponse({"running": False, "elapsed_seconds": 0, "output": [], "error": None, "done": False})
     elapsed = time.time() - s["started_at"]
     return JSONResponse({
         "running": s["running"],
         "elapsed_seconds": round(elapsed, 1),
-        "output": s["output"][-100:],  # Last 100 lines
+        "output": s["output"][-100:],
         "error": s["error"],
         "done": s["done"]
     })
 
 
 async def api_reindex(request: Request, reindex_lock, reindex_state: dict, run_reindex_fn) -> JSONResponse:
-    """Trigger reindex."""
     import threading
-
     try:
         body = await request.json()
     except Exception:
@@ -542,25 +641,21 @@ async def api_reindex(request: Request, reindex_lock, reindex_state: dict, run_r
 
 
 async def api_stats(request: Request, qdrant_url: str, ollama_url: str) -> JSONResponse:
-    """Get collection stats and service status."""
     client = QdrantClient(url=qdrant_url)
     result = {}
 
-    # Notes collection
     try:
         info = client.get_collection("notes")
         result["notes"] = {"points_count": info.points_count}
     except Exception as e:
         result["notes"] = {"error": str(e)}
 
-    # Code collection
     try:
         info = client.get_collection("code")
         result["code"] = {"points_count": info.points_count}
     except Exception as e:
         result["code"] = {"error": str(e)}
 
-    # Ollama status
     try:
         resp = httpx.get(f"{ollama_url}/api/tags", timeout=5)
         result["ollama"] = {"status": "ok" if resp.status_code == 200 else "error"}
