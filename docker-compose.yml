@@ -29,8 +29,10 @@ services:
       - API_KEY=${API_KEY:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+      - REPOS_CONFIG=/app/data/repos.json
     volumes:
       - /home/docker/volumes/syncthing/notes:/notes:ro
+      - /home/docker/volumes/cortex/config:/app/data
     ports:
       - "8765:8765"
     depends_on:
