@@ -128,19 +128,6 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         input[type="text"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
         input[type="text"]::placeholder { color: var(--text-muted); }
 
-        select {
-            width: 100%;
-            padding: 0.625rem 1rem;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            color: var(--text);
-            font-size: 0.875rem;
-            margin-bottom: 0.5rem;
-            cursor: pointer;
-        }
-        select:focus { outline: none; border-color: var(--accent); }
-
         button {
             padding: 0.625rem 1.25rem;
             background: var(--accent);
@@ -254,10 +241,20 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             transition: border-color 0.15s;
         }
         .repo-item:hover { border-color: rgba(167,139,250,0.25); }
-        .repo-name { font-size: 0.8125rem; font-family: 'SF Mono', Consolas, monospace; }
-        .repo-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
-        .add-repo-section { margin-top: 1.5rem; }
-        .add-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+        .repo-item.indexed { border-color: rgba(167,139,250,0.2); }
+        .repo-info { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+        .repo-name { font-size: 0.8125rem; font-family: 'SF Mono', Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .repo-badge {
+            font-size: 0.65rem;
+            background: var(--accent-dim);
+            color: var(--accent);
+            border: 1px solid rgba(167,139,250,0.3);
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .repo-actions { display: flex; gap: 0.4rem; flex-shrink: 0; margin-left: 0.75rem; }
 
         .message {
             padding: 0.625rem 0.875rem;
@@ -309,19 +306,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
 
         <div id="repos-panel" class="panel">
             <div id="repo-list"></div>
-            <div class="add-repo-section">
-                <div class="section-title">Add Repo</div>
-                <div class="add-row">
-                    <input type="text" id="repo-input" placeholder="Xoudusz/repo-name">
-                    <button id="repo-add-btn">Add</button>
-                </div>
-                <button class="secondary" id="load-github-repos-btn">Load from GitHub</button>
-                <div id="github-repo-picker" style="display:none;margin-top:0.75rem">
-                    <select id="github-repo-select"><option value="">Select a repo...</option></select>
-                    <button id="github-repo-add-btn">Add Selected</button>
-                </div>
-                <div id="repo-message" style="margin-top:0.75rem"></div>
-            </div>
+            <div id="repo-message" style="margin-top:0.75rem"></div>
         </div>
 
         <div id="admin-panel" class="panel">
@@ -467,23 +452,50 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             }
         }).catch(() => {});
 
+        // Repos — load all GitHub repos + configured, merge into one list
         async function loadRepos() {
             const listDiv = document.getElementById('repo-list');
-            listDiv.innerHTML = '<div class="empty loading">Loading...</div>';
+            listDiv.innerHTML = '<div class="empty loading">Loading repos...</div>';
             try {
-                const data = await api('/api/repos');
-                renderRepos(data.repos || []);
+                const [configRes, ghRes] = await Promise.allSettled([
+                    api('/api/repos'),
+                    api('/api/github/repos')
+                ]);
+                const indexed = configRes.status === 'fulfilled' ? (configRes.value.repos || []) : [];
+                const all = ghRes.status === 'fulfilled' ? (ghRes.value.repos || []) : indexed;
+                renderRepos(all, indexed);
             } catch (err) {
                 listDiv.innerHTML = '<div class="message error">' + escapeHtml(err.message) + '</div>';
             }
         }
 
-        function renderRepos(repos) {
+        function renderRepos(allRepos, indexedRepos) {
             const listDiv = document.getElementById('repo-list');
-            if (!repos.length) { listDiv.innerHTML = '<div class="empty">No repos configured.</div>'; return; }
-            listDiv.innerHTML = repos.map(repo =>
-                '<div class="repo-item" data-repo="' + escapeHtml(repo) + '"><span class="repo-name">' + escapeHtml(repo) + '</span><div class="repo-actions"><button class="secondary small repo-reindex-btn">Reindex</button><button class="danger small repo-remove-btn">Remove</button></div></div>'
-            ).join('');
+            if (!allRepos.length) { listDiv.innerHTML = '<div class="empty">No repos found.</div>'; return; }
+            const indexedSet = new Set(indexedRepos);
+
+            // Sort: indexed first, then alphabetical
+            const sorted = [...allRepos].sort((a, b) => {
+                const ai = indexedSet.has(a) ? 0 : 1;
+                const bi = indexedSet.has(b) ? 0 : 1;
+                return ai - bi || a.localeCompare(b);
+            });
+
+            listDiv.innerHTML = sorted.map(repo => {
+                const isIndexed = indexedSet.has(repo);
+                return '<div class="repo-item' + (isIndexed ? ' indexed' : '') + '" data-repo="' + escapeHtml(repo) + '">' +
+                    '<div class="repo-info">' +
+                    '<span class="repo-name">' + escapeHtml(repo) + '</span>' +
+                    (isIndexed ? '<span class="repo-badge">indexed</span>' : '') +
+                    '</div>' +
+                    '<div class="repo-actions">' +
+                    (isIndexed
+                        ? '<button class="secondary small repo-reindex-btn">Reindex</button><button class="danger small repo-remove-btn">Remove</button>'
+                        : '<button class="secondary small repo-add-btn">Add to index</button>'
+                    ) +
+                    '</div></div>';
+            }).join('');
+
             listDiv.querySelectorAll('.repo-reindex-btn').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const repo = btn.closest('.repo-item').dataset.repo;
@@ -494,13 +506,27 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     finally { btn.disabled = false; btn.textContent = 'Reindex'; }
                 });
             });
+
             listDiv.querySelectorAll('.repo-remove-btn').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const repo = btn.closest('.repo-item').dataset.repo;
                     try {
                         const data = await api('/api/repos/' + encodeURIComponent(repo), { method: 'DELETE' });
-                        renderRepos(data.repos || []); showRepoMsg('Removed ' + repo, 'info');
+                        renderRepos(allRepos, data.repos || []);
+                        showRepoMsg('Removed ' + repo.split('/')[1] + ' from index', 'info');
                     } catch (err) { showRepoMsg(err.message, 'error'); }
+                });
+            });
+
+            listDiv.querySelectorAll('.repo-add-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const repo = btn.closest('.repo-item').dataset.repo;
+                    btn.disabled = true; btn.textContent = '...';
+                    try {
+                        const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo }) });
+                        renderRepos(allRepos, data.repos || []);
+                        showRepoMsg('Added ' + repo.split('/')[1] + ' to index', 'info');
+                    } catch (err) { showRepoMsg(err.message, 'error'); btn.disabled = false; btn.textContent = 'Add to index'; }
                 });
             });
         }
@@ -510,42 +536,6 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             div.innerHTML = '<div class="message ' + type + '">' + escapeHtml(msg) + '</div>';
             setTimeout(() => { div.innerHTML = ''; }, 4000);
         }
-
-        document.getElementById('repo-add-btn').addEventListener('click', async () => {
-            const val = document.getElementById('repo-input').value.trim();
-            if (!val) return;
-            try {
-                const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo: val }) });
-                document.getElementById('repo-input').value = '';
-                renderRepos(data.repos || []); showRepoMsg('Added ' + val, 'info');
-            } catch (err) { showRepoMsg(err.message, 'error'); }
-        });
-
-        document.getElementById('repo-input').addEventListener('keydown', e => {
-            if (e.key === 'Enter') document.getElementById('repo-add-btn').click();
-        });
-
-        document.getElementById('load-github-repos-btn').addEventListener('click', async () => {
-            const btn = document.getElementById('load-github-repos-btn');
-            btn.disabled = true; btn.textContent = 'Loading...';
-            try {
-                const data = await api('/api/github/repos');
-                const select = document.getElementById('github-repo-select');
-                select.innerHTML = '<option value="">Select a repo...</option>' +
-                    (data.repos || []).map(r => '<option value="' + escapeHtml(r) + '">' + escapeHtml(r) + '</option>').join('');
-                document.getElementById('github-repo-picker').style.display = 'block';
-            } catch (err) { showRepoMsg(err.message, 'error'); }
-            finally { btn.disabled = false; btn.textContent = 'Load from GitHub'; }
-        });
-
-        document.getElementById('github-repo-add-btn').addEventListener('click', async () => {
-            const val = document.getElementById('github-repo-select').value;
-            if (!val) return;
-            try {
-                const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo: val }) });
-                renderRepos(data.repos || []); showRepoMsg('Added ' + val, 'info');
-            } catch (err) { showRepoMsg(err.message, 'error'); }
-        });
     </script>
 </body>
 </html>"""
