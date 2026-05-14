@@ -5,6 +5,7 @@ import os
 import subprocess
 import threading
 import time
+from datetime import datetime, timezone
 
 import hashlib
 import hmac
@@ -51,23 +52,45 @@ DEFAULT_REPOS = [
     "Xoudusz/riftracoons-web",
 ]
 
+# Webhook log — last 50 events, in-memory only
+_webhook_log: list[dict] = []
 
-def _load_repos() -> list[str]:
+
+def _load_repos_meta() -> dict:
+    """Load full repos metadata: {repos: [...], indexed_at: {name: iso_ts}}."""
     try:
         if os.path.exists(REPOS_CONFIG):
             with open(REPOS_CONFIG) as f:
                 data = json.load(f)
+            if isinstance(data, dict):
+                return {"repos": data.get("repos", []), "indexed_at": data.get("indexed_at", {})}
             if isinstance(data, list) and data:
-                return data
+                return {"repos": data, "indexed_at": {}}
     except Exception:
         pass
-    return list(DEFAULT_REPOS)
+    return {"repos": list(DEFAULT_REPOS), "indexed_at": {}}
+
+
+def _load_repos() -> list[str]:
+    return _load_repos_meta()["repos"]
+
+
+def _save_repos_meta(meta: dict) -> None:
+    os.makedirs(os.path.dirname(REPOS_CONFIG) or ".", exist_ok=True)
+    with open(REPOS_CONFIG, "w") as f:
+        json.dump(meta, f, indent=2)
 
 
 def _save_repos(repos: list[str]) -> None:
-    os.makedirs(os.path.dirname(REPOS_CONFIG) or ".", exist_ok=True)
-    with open(REPOS_CONFIG, "w") as f:
-        json.dump(repos, f, indent=2)
+    meta = _load_repos_meta()
+    meta["repos"] = repos
+    _save_repos_meta(meta)
+
+
+def _update_indexed_at(repo_name: str) -> None:
+    meta = _load_repos_meta()
+    meta.setdefault("indexed_at", {})[repo_name] = datetime.now(timezone.utc).isoformat()
+    _save_repos_meta(meta)
 
 
 mcp = FastMCP("cortex", host=HOST, port=PORT)
@@ -195,7 +218,6 @@ _reindex_state: dict = {"running": False, "started_at": None, "output": [], "err
 
 
 def _stream(cmd: list[str], label: str, timeout: int) -> None:
-    """Run cmd, streaming each output line to logger and _reindex_state."""
     _reindex_state["output"].append(f"=== {label}: starting ===")
     log.info("[%s] starting", label)
     proc = subprocess.Popen(
@@ -232,6 +254,12 @@ def _run_reindex(notes: bool, code: bool, repo: str = "") -> None:
             if repo:
                 cmd += ["--repo", repo]
             _stream(cmd, "code", 600)
+            # Record indexed_at timestamps
+            if repo:
+                _update_indexed_at(repo)
+            else:
+                for r in _load_repos():
+                    _update_indexed_at(r.split("/")[1])
     except Exception as e:
         _reindex_state["error"] = str(e)
         log.error("reindex error: %s", e)
@@ -263,11 +291,7 @@ def reindex(notes: bool = True, code: bool = True, repo: str = "") -> str:
 
 @mcp.tool()
 def reindex_status() -> str:
-    """Check whether a reindex is running or finished, and see its output log.
-
-    Call this after reindex() to monitor progress. Returns elapsed time, status,
-    streamed output lines, and any errors.
-    """
+    """Check whether a reindex is running or finished, and see its output log."""
     s = _reindex_state
     if s["started_at"] is None:
         return "No reindex has been run yet."
@@ -282,24 +306,19 @@ def reindex_status() -> str:
 
 
 def _merge_onboarding(existing: str) -> str:
-    """Merge onboarding template with existing CLAUDE.md content."""
     sections = {
         "## MCP Setup": "## MCP Setup (if not connected)",
         "## Cortex Tools": "## Cortex Tools",
         "## Preferences": "## Preferences",
     }
-
     result = existing.rstrip()
     added = []
-
     for marker, full_header in sections.items():
         if marker.lower() in existing.lower() or "cortex" in existing.lower() and "search_notes" in existing.lower():
             continue
-
         template_lines = ONBOARDING_TEMPLATE.split("\n")
         in_section = False
         section_content = []
-
         for line in template_lines:
             if line.startswith(full_header) or line.startswith(marker):
                 in_section = True
@@ -308,41 +327,19 @@ def _merge_onboarding(existing: str) -> str:
                 break
             elif in_section:
                 section_content.append(line)
-
         if section_content:
             added.append("\n".join(section_content).rstrip())
-
     if not added:
         return existing + "\n\n<!-- Cortex onboarding: all sections already present -->"
-
     if "# cortex" not in existing.lower() and "## cortex" not in existing.lower():
         result += "\n\n# Cortex Onboarding"
-
     result += "\n\n" + "\n\n".join(added)
     return result
 
 
 @mcp.tool()
 def get_onboarding(existing_content: str = "") -> str:
-    """Get onboarding instructions for CLAUDE.md.
-
-    Returns setup instructions, tool usage, and user preferences.
-
-    Args:
-        existing_content: If provided, merges with existing CLAUDE.md content,
-                         adding only missing sections. Pass empty string for
-                         full template.
-
-    Call this when:
-    - Starting a new project that should use Cortex
-    - User asks how to set up Cortex in a new repo
-    - User wants their preferences documented in a project
-
-    Usage:
-    1. Claude Code reads existing CLAUDE.md (if any)
-    2. Pass content to get_onboarding(existing_content=...)
-    3. Write merged result back to CLAUDE.md
-    """
+    """Get onboarding instructions for CLAUDE.md."""
     if existing_content.strip():
         return _merge_onboarding(existing_content)
     return ONBOARDING_TEMPLATE
@@ -350,13 +347,7 @@ def get_onboarding(existing_content: str = "") -> str:
 
 @mcp.prompt()
 def onboarding() -> str:
-    """Set up Cortex and user preferences for this project.
-
-    Run /onboarding in any new project to configure:
-    - CLAUDE.md with Cortex tools + preferences
-    - Git user config
-    - Install missing tools (rtk, caveman)
-    """
+    """Set up Cortex and user preferences for this project."""
     return f"""Set up Cortex for this project. Execute this checklist:
 
 ## 1. CLAUDE.md
@@ -367,27 +358,18 @@ Read existing CLAUDE.md (if any). Merge with this config, avoiding duplicates:
 Write merged result to CLAUDE.md.
 
 ## 2. Git Config
-Run for this repo:
 ```bash
 rtk git config user.name "Xoudusz" && rtk git config user.email "da@w23.at"
 ```
 
 ## 3. Check RTK
-Run `rtk --version`. If fails, install:
-```bash
-cargo install rtk
-```
+Run `rtk --version`. If fails: `cargo install rtk`
 
 ## 4. Check Caveman Skill
-Run `claude skill list`. If caveman missing:
-```bash
-claude skill add caveman:caveman
-```
+Run `claude skill list`. If missing: `claude skill add caveman:caveman`
 
 ## 5. Verify Cortex
-Test connection: call `search_notes("test query")`. Should return results or "No results found."
-
-Report status of each step when done."""
+Call `search_notes("test query")`. Report status of each step when done."""
 
 
 class _NotesHandler(FileSystemEventHandler):
@@ -425,7 +407,6 @@ class _APIKeyMiddleware:
                 or "/.well-known" in path
                 or path.startswith("/api/")
             )
-
             if not unprotected:
                 headers = {k: v for k, v in scope.get("headers", [])}
                 key = headers.get(b"x-api-key", b"").decode()
@@ -460,10 +441,15 @@ async def webhook(request: Request) -> JSONResponse:
         repo = json.loads(body).get("repository", {}).get("name", "")
     except Exception:
         repo = ""
+    ts = datetime.now(timezone.utc).isoformat()
     with _reindex_lock:
         if _reindex_state["running"]:
+            _webhook_log.insert(0, {"repo": repo or "unknown", "ts": ts, "status": "skipped (already running)"})
+            _webhook_log[:] = _webhook_log[:50]
             log.info("[webhook] push received but reindex already running")
             return JSONResponse({"status": "reindex already running"})
+        _webhook_log.insert(0, {"repo": repo or "unknown", "ts": ts, "status": "triggered"})
+        _webhook_log[:] = _webhook_log[:50]
         threading.Thread(target=_run_reindex, args=(False, True, repo), daemon=True).start()
     log.info("[webhook] push on %s → code reindex triggered", repo or "unknown")
     return JSONResponse({"status": "ok", "repo": repo})
@@ -483,24 +469,20 @@ def _start_watcher():
 async def _ui_handler(request: Request):
     return await ui(request)
 
-
 async def _api_search_handler(request: Request):
     return await api_search(request, QDRANT_URL, embed)
-
 
 async def _api_status_handler(request: Request):
     return await api_status(request, _reindex_state)
 
-
 async def _api_reindex_handler(request: Request):
     return await api_reindex(request, _reindex_lock, _reindex_state, _run_reindex)
-
 
 async def _api_stats_handler(request: Request):
     return await api_stats(request, QDRANT_URL, OLLAMA_URL)
 
 
-# Repos management handlers
+# Repos management
 async def _api_repos_handler(request: Request) -> JSONResponse:
     if request.method == "GET":
         return JSONResponse({"repos": _load_repos()})
@@ -517,7 +499,6 @@ async def _api_repos_handler(request: Request) -> JSONResponse:
         _save_repos(repos)
     return JSONResponse({"repos": repos})
 
-
 async def _api_repos_delete(request: Request) -> JSONResponse:
     repo = request.path_params.get("repo", "")
     repos = [r for r in _load_repos() if r != repo]
@@ -525,6 +506,8 @@ async def _api_repos_delete(request: Request) -> JSONResponse:
     log.info("[repos] removed %s", repo)
     return JSONResponse({"repos": repos})
 
+async def _api_repos_meta_handler(request: Request) -> JSONResponse:
+    return JSONResponse(_load_repos_meta())
 
 async def _api_github_repos(request: Request) -> JSONResponse:
     if not GITHUB_TOKEN:
@@ -542,9 +525,11 @@ async def _api_github_repos(request: Request) -> JSONResponse:
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+async def _api_webhook_log_handler(request: Request) -> JSONResponse:
+    return JSONResponse({"log": _webhook_log})
+
 
 class _NormalizeSSEPath:
-    """Rewrite /sse to /sse/sse — FastMCP mounts handler at /sse internally."""
     def __init__(self, app): self.app = app
     async def __call__(self, scope, receive, send):
         if scope.get('type') == 'http' and scope.get('path') == '/sse':
@@ -567,7 +552,9 @@ if __name__ == "__main__":
         Route("/api/stats", _api_stats_handler, methods=["GET"]),
         Route("/api/repos", _api_repos_handler, methods=["GET", "POST"]),
         Route("/api/repos/{repo:path}", _api_repos_delete, methods=["DELETE"]),
+        Route("/api/repos-meta", _api_repos_meta_handler, methods=["GET"]),
         Route("/api/github/repos", _api_github_repos, methods=["GET"]),
+        Route("/api/webhook-log", _api_webhook_log_handler, methods=["GET"]),
         Route("/.well-known/oauth-authorization-server", oauth_not_found),
         Route("/.well-known/openid-configuration", oauth_not_found),
         Route("/register", oauth_not_found, methods=["POST"]),
