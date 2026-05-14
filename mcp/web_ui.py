@@ -43,11 +43,11 @@ _UI_TEMPLATE = """<!DOCTYPE html>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
-            --bg: #0d0f14;
-            --surface: #13161e;
-            --border: #252a38;
+            --bg: #111318;
+            --surface: #1c2030;
+            --border: #2d3248;
             --text: #e2e8f0;
-            --text-muted: #7c8698;
+            --text-muted: #8896a8;
             --accent: #a78bfa;
             --accent-hover: #c084fc;
             --accent-dim: rgba(167, 139, 250, 0.12);
@@ -326,9 +326,9 @@ _UI_TEMPLATE = """<!DOCTYPE html>
 
         <div id="admin-panel" class="panel">
             <div class="stats-grid">
-                <div class="stat-card"><div class="stat-label">Notes indexed</div><div class="stat-value" id="stat-notes">—</div></div>
-                <div class="stat-card"><div class="stat-label">Code chunks</div><div class="stat-value" id="stat-code">—</div></div>
-                <div class="stat-card"><div class="stat-label">Ollama</div><div class="stat-value" id="stat-ollama">—</div></div>
+                <div class="stat-card"><div class="stat-label">Notes indexed</div><div class="stat-value" id="stat-notes">-</div></div>
+                <div class="stat-card"><div class="stat-label">Code chunks</div><div class="stat-value" id="stat-code">-</div></div>
+                <div class="stat-card"><div class="stat-label">Ollama</div><div class="stat-value" id="stat-ollama">-</div></div>
             </div>
             <div class="reindex-section">
                 <div class="section-title">Reindex</div>
@@ -343,6 +343,8 @@ _UI_TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <script>
+        const NL = String.fromCharCode(10);
+
         async function api(path, options = {}) {
             const res = await fetch(path, {
                 ...options,
@@ -402,7 +404,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     const tags = (r.tags || []).map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('');
                     return '<div class="result-card"><div class="result-header"><div class="result-title">' + escapeHtml(r.file) + ' › ' + escapeHtml(r.heading) + '</div><div class="result-meta">score ' + r.score.toFixed(3) + '</div></div><div class="result-content">' + escapeHtml(r.text) + '</div>' + (tags ? '<div class="result-tags">' + tags + '</div>' : '') + '</div>';
                 } else {
-                    const link = r.github_url ? '<a href="' + escapeHtml(r.github_url) + '" target="_blank">↗ GitHub</a>' : '';
+                    const link = r.github_url ? '<a href="' + escapeHtml(r.github_url) + '" target="_blank">GitHub</a>' : '';
                     return '<div class="result-card"><div class="result-header"><div class="result-title">' + escapeHtml(r.repo) + ' / ' + escapeHtml(r.file) + ' :' + r.start_line + '-' + r.end_line + '</div><div class="result-meta">' + escapeHtml(r.language || '') + ' · ' + r.score.toFixed(3) + (link ? ' · ' + link : '') + '</div></div><div class="result-content">' + escapeHtml(r.text) + '</div></div>';
                 }
             }).join('');
@@ -411,8 +413,8 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         async function loadStats() {
             try {
                 const data = await api('/api/stats');
-                document.getElementById('stat-notes').textContent = data.notes?.points_count?.toLocaleString() ?? '—';
-                document.getElementById('stat-code').textContent = data.code?.points_count?.toLocaleString() ?? '—';
+                document.getElementById('stat-notes').textContent = data.notes?.points_count?.toLocaleString() ?? '-';
+                document.getElementById('stat-code').textContent = data.code?.points_count?.toLocaleString() ?? '-';
                 const ollama = document.getElementById('stat-ollama');
                 ollama.textContent = data.ollama?.status === 'ok' ? '✓' : '✗';
                 ollama.className = 'stat-value ' + (data.ollama?.status === 'ok' ? 'ok' : 'error');
@@ -440,9 +442,9 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             const update = async () => {
                 try {
                     const data = await api('/api/status');
-                    let text = 'Status: ' + (data.running ? 'running' : 'done') + ' (' + Math.round(data.elapsed_seconds) + 's)\n\n';
-                    text += (data.output || []).join('\n');
-                    if (data.error) text += '\n\nError: ' + data.error;
+                    let text = 'Status: ' + (data.running ? 'running' : 'done') + ' (' + Math.round(data.elapsed_seconds) + 's)' + NL + NL;
+                    text += (data.output || []).join(NL);
+                    if (data.error) text += NL + NL + 'Error: ' + data.error;
                     statusDiv.textContent = text;
                     statusDiv.scrollTop = statusDiv.scrollHeight;
                     if (data.done && !data.running) {
@@ -459,8 +461,8 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         api('/api/status').then(data => {
             if (data.running) pollStatus();
             else if (data.done) {
-                let text = 'Last run: done (' + Math.round(data.elapsed_seconds) + 's)\n\n';
-                text += (data.output || []).join('\n');
+                let text = 'Last run: done (' + Math.round(data.elapsed_seconds) + 's)' + NL + NL;
+                text += (data.output || []).join(NL);
                 document.getElementById('reindex-status').textContent = text;
             }
         }).catch(() => {});
@@ -487,7 +489,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     const repo = btn.closest('.repo-item').dataset.repo;
                     const name = repo.split('/')[1];
                     btn.disabled = true; btn.textContent = '...';
-                    try { await triggerReindex(false, true, name); showRepoMsg('Reindexing ' + name + '… check Admin tab.', 'info'); }
+                    try { await triggerReindex(false, true, name); showRepoMsg('Reindexing ' + name + '...', 'info'); }
                     catch (err) { showRepoMsg(err.message, 'error'); }
                     finally { btn.disabled = false; btn.textContent = 'Reindex'; }
                 });
@@ -560,42 +562,32 @@ async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONRespons
         body = await request.json()
     except Exception:
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-
     query = body.get("query", "").strip()
     if not query:
         return JSONResponse({"error": "Query required"}, status_code=400)
-
     collections = body.get("collections", ["notes", "code"])
     limit = min(body.get("limit", 10), 50)
-
     client = QdrantClient(url=qdrant_url)
     vector = embed_fn(query)
     result = {}
-
     if "notes" in collections:
         try:
             points = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
-            result["notes"] = [
-                {"file": p.payload.get("file", ""), "heading": p.payload.get("heading", ""),
-                 "text": p.payload.get("text", ""), "tags": p.payload.get("tags", []), "score": round(p.score, 4)}
-                for p in points
-            ]
+            result["notes"] = [{"file": p.payload.get("file", ""), "heading": p.payload.get("heading", ""),
+                                 "text": p.payload.get("text", ""), "tags": p.payload.get("tags", []),
+                                 "score": round(p.score, 4)} for p in points]
         except Exception as e:
             result["notes"] = []; result["notes_error"] = str(e)
-
     if "code" in collections:
         try:
             points = client.query_points("code", query=vector, limit=limit, with_payload=True).points
-            result["code"] = [
-                {"repo": p.payload.get("repo", ""), "file": p.payload.get("file", ""),
-                 "start_line": p.payload.get("start_line", 0), "end_line": p.payload.get("end_line", 0),
-                 "language": p.payload.get("language", ""), "text": p.payload.get("text", ""),
-                 "github_url": p.payload.get("github_url", ""), "score": round(p.score, 4)}
-                for p in points
-            ]
+            result["code"] = [{"repo": p.payload.get("repo", ""), "file": p.payload.get("file", ""),
+                                "start_line": p.payload.get("start_line", 0), "end_line": p.payload.get("end_line", 0),
+                                "language": p.payload.get("language", ""), "text": p.payload.get("text", ""),
+                                "github_url": p.payload.get("github_url", ""), "score": round(p.score, 4)}
+                               for p in points]
         except Exception as e:
             result["code"] = []; result["code_error"] = str(e)
-
     return JSONResponse(result)
 
 
