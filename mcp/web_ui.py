@@ -151,7 +151,6 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             cursor: pointer;
         }
         select:focus { outline: none; border-color: var(--accent); }
-        select.wide { width: 100%; margin-bottom: 0.5rem; }
 
         button {
             padding: 0.625rem 1.25rem;
@@ -346,7 +345,6 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             return Math.floor(diff / 86400) + 'd ago';
         }
 
-        // Tabs
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -358,7 +356,6 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             });
         });
 
-        // Header status dot — background poll every 5s
         const statusDot = document.getElementById('status-dot');
         async function pollStatusDot() {
             try {
@@ -369,7 +366,6 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         pollStatusDot();
         setInterval(pollStatusDot, 5000);
 
-        // Search
         const searchForm = document.getElementById('search-form');
         const queryInput = document.getElementById('query');
         const resultsDiv = document.getElementById('search-results');
@@ -382,11 +378,10 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         }
         codeToggle.addEventListener('change', updateRepoFilterVisibility);
 
-        // Load indexed repos into filter dropdown
         async function loadRepoFilter() {
             try {
                 const meta = await api('/api/repos-meta');
-                const indexed = (meta.repos || []).map(r => r.split('/')[1]);
+                const indexed = (meta.indexed_at ? Object.keys(meta.indexed_at) : (meta.repos || []).map(r => r.split('/')[1]));
                 repoFilterSelect.innerHTML = '<option value="">All repos</option>' +
                     indexed.map(n => '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>').join('');
             } catch (_) {}
@@ -430,7 +425,6 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             }).join('');
         }
 
-        // Stats
         async function loadStats() {
             try {
                 const data = await api('/api/stats');
@@ -442,7 +436,6 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             } catch (err) { console.error('Failed to load stats:', err); }
         }
 
-        // Webhook log
         async function loadWebhookLog() {
             const wrap = document.getElementById('webhook-log-wrap');
             try {
@@ -455,7 +448,6 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             } catch (err) { wrap.innerHTML = '<div class="empty">Failed to load webhook log.</div>'; }
         }
 
-        // Reindex
         let statusPoll = null;
         document.getElementById('reindex-all').addEventListener('click', () => triggerReindex(true, true));
         document.getElementById('reindex-notes').addEventListener('click', () => triggerReindex(true, false));
@@ -504,7 +496,6 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             }
         }).catch(() => {});
 
-        // Repos — uses /api/repos-meta for indexed_at + /api/github/repos for full list
         async function loadRepos() {
             const listDiv = document.getElementById('repo-list');
             listDiv.innerHTML = '<div class="empty loading">Loading repos...</div>';
@@ -533,15 +524,16 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 return ai - bi || a.localeCompare(b);
             });
             listDiv.innerHTML = sorted.map(repo => {
-                const isIndexed = indexedSet.has(repo);
+                const isTracked = indexedSet.has(repo);
                 const name = repo.split('/')[1];
-                const age = isIndexed && indexedAt[name] ? timeAgo(indexedAt[name]) : '';
-                return '<div class="repo-item' + (isIndexed ? ' indexed' : '') + '" data-repo="' + escapeHtml(repo) + '">' +
+                const hasIndexedAt = isTracked && !!indexedAt[name];
+                const age = hasIndexedAt ? timeAgo(indexedAt[name]) : '';
+                return '<div class="repo-item' + (hasIndexedAt ? ' indexed' : '') + '" data-repo="' + escapeHtml(repo) + '">' +
                     '<div class="repo-info"><span class="repo-name">' + escapeHtml(repo) + '</span>' +
-                    (isIndexed ? '<div class="repo-meta"><span class="repo-badge">indexed</span>' + (age ? '<span class="repo-age">' + escapeHtml(age) + '</span>' : '') + '</div>' : '') +
+                    (hasIndexedAt ? '<div class="repo-meta"><span class="repo-badge">indexed</span><span class="repo-age">' + escapeHtml(age) + '</span></div>' : '') +
                     '</div>' +
                     '<div class="repo-actions">' +
-                    (isIndexed
+                    (isTracked
                         ? '<button class="secondary small repo-reindex-btn">Reindex</button><button class="danger small repo-remove-btn">Remove</button>'
                         : '<button class="secondary small repo-add-btn">Add to index</button>'
                     ) +
@@ -578,7 +570,9 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     try {
                         const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo }) });
                         renderRepos(allRepos, data.repos || [], indexedAt);
-                        showRepoMsg('Added ' + repo.split('/')[1] + ' to index', 'info');
+                        const name = repo.split('/')[1];
+                        showRepoMsg('Added ' + name + ' — indexing...', 'info');
+                        await triggerReindex(false, true, name);
                         loadRepoFilter();
                     } catch (err) { showRepoMsg(err.message, 'error'); btn.disabled = false; btn.textContent = 'Add to index'; }
                 });
