@@ -2,6 +2,7 @@
 
 import httpx
 from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
@@ -73,6 +74,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             border-bottom: 1px solid var(--border);
         }
         .logo-svg { width: 28px; height: 28px; flex-shrink: 0; }
+        .header-text { flex: 1; }
         .header-text h1 {
             font-size: 1.25rem;
             font-weight: 700;
@@ -83,6 +85,21 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             background-clip: text;
         }
         .header-text span { font-size: 0.75rem; color: var(--text-muted); }
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+            flex-shrink: 0;
+            display: none;
+        }
+        .status-dot.active {
+            display: block;
+            animation: pulse-dot 1.2s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.75); }
+        }
 
         .tabs {
             display: flex;
@@ -105,11 +122,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             transition: all 0.15s;
         }
         .tab:hover { color: var(--text); }
-        .tab.active {
-            background: var(--accent-dim);
-            color: var(--accent);
-            box-shadow: inset 0 0 0 1px rgba(167,139,250,0.25);
-        }
+        .tab.active { background: var(--accent-dim); color: var(--accent); box-shadow: inset 0 0 0 1px rgba(167,139,250,0.25); }
 
         .panel { display: none; }
         .panel.active { display: block; }
@@ -128,6 +141,18 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         input[type="text"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
         input[type="text"]::placeholder { color: var(--text-muted); }
 
+        select {
+            padding: 0.5rem 0.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 0.8125rem;
+            cursor: pointer;
+        }
+        select:focus { outline: none; border-color: var(--accent); }
+        select.wide { width: 100%; margin-bottom: 0.5rem; }
+
         button {
             padding: 0.625rem 1.25rem;
             background: var(--accent);
@@ -142,23 +167,17 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         button:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 4px 12px var(--accent-glow); }
         button:active { transform: translateY(0); }
         button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
-        button.secondary {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            color: var(--text-muted);
-        }
+        button.secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
         button.secondary:hover { border-color: var(--accent); color: var(--accent); box-shadow: none; }
         button.small { padding: 0.3rem 0.7rem; font-size: 0.75rem; }
-        button.danger {
-            background: rgba(248, 113, 113, 0.1);
-            border: 1px solid rgba(248, 113, 113, 0.3);
-            color: var(--error);
-        }
-        button.danger:hover { background: rgba(248, 113, 113, 0.2); box-shadow: none; }
+        button.danger { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--error); }
+        button.danger:hover { background: rgba(248,113,113,0.2); box-shadow: none; }
 
-        .toggles { display: flex; gap: 1.25rem; margin-bottom: 1.25rem; }
+        .toggles { display: flex; gap: 1.25rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; }
         .toggle { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer; }
         .toggle input { accent-color: var(--accent); }
+        .repo-filter-row { margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+        .repo-filter-label { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
 
         .results { display: flex; flex-direction: column; gap: 0.625rem; }
         .result-card {
@@ -173,95 +192,54 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         .result-title { font-weight: 600; font-size: 0.8125rem; color: var(--accent); word-break: break-all; line-height: 1.4; }
         .result-meta { font-size: 0.7rem; color: var(--text-muted); text-align: right; white-space: nowrap; flex-shrink: 0; }
         .result-content {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            white-space: pre-wrap;
-            max-height: 180px;
-            overflow-y: auto;
-            background: var(--bg);
-            padding: 0.625rem 0.75rem;
-            border-radius: 6px;
-            font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
-            line-height: 1.5;
+            font-size: 0.8rem; color: var(--text-muted); white-space: pre-wrap;
+            max-height: 180px; overflow-y: auto; background: var(--bg);
+            padding: 0.625rem 0.75rem; border-radius: 6px;
+            font-family: 'SF Mono', 'Fira Code', Consolas, monospace; line-height: 1.5;
         }
         .result-tags { margin-top: 0.5rem; display: flex; gap: 0.25rem; flex-wrap: wrap; }
-        .tag {
-            background: var(--accent-dim);
-            border: 1px solid rgba(167,139,250,0.2);
-            padding: 0.1rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.7rem;
-            color: var(--accent);
-        }
+        .tag { background: var(--accent-dim); border: 1px solid rgba(167,139,250,0.2); padding: 0.1rem 0.5rem; border-radius: 4px; font-size: 0.7rem; color: var(--accent); }
 
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 0.75rem;
-            margin-bottom: 1.5rem;
-        }
-        .stat-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 1rem 1.25rem;
-        }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
+        .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; }
         .stat-label { font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.375rem; text-transform: uppercase; letter-spacing: 0.05em; }
         .stat-value { font-size: 1.75rem; font-weight: 700; }
         .stat-value.ok { color: var(--success); }
         .stat-value.error { color: var(--error); }
 
-        .reindex-section { margin-top: 1.5rem; }
+        .section { margin-top: 1.5rem; }
         .section-title { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem; }
         .reindex-buttons { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
         .status-log {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 0.875rem 1rem;
-            font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
-            font-size: 0.75rem;
-            max-height: 280px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            color: var(--text-muted);
-            line-height: 1.5;
+            background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+            padding: 0.875rem 1rem; font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+            font-size: 0.75rem; max-height: 280px; overflow-y: auto; white-space: pre-wrap;
+            color: var(--text-muted); line-height: 1.5;
         }
         .status-running { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
 
+        .webhook-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+        .webhook-table th { text-align: left; padding: 0.5rem 0.75rem; color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
+        .webhook-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(45,50,72,0.5); font-family: 'SF Mono', Consolas, monospace; }
+        .webhook-table tr:last-child td { border-bottom: none; }
+        .wh-triggered { color: var(--success); }
+        .wh-skipped { color: var(--text-muted); }
+
         .repo-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 0.625rem 0.875rem;
-            margin-bottom: 0.4rem;
-            transition: border-color 0.15s;
+            display: flex; justify-content: space-between; align-items: center;
+            background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+            padding: 0.625rem 0.875rem; margin-bottom: 0.4rem; transition: border-color 0.15s;
         }
         .repo-item:hover { border-color: rgba(167,139,250,0.25); }
         .repo-item.indexed { border-color: rgba(167,139,250,0.2); }
-        .repo-info { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+        .repo-info { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1; }
         .repo-name { font-size: 0.8125rem; font-family: 'SF Mono', Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .repo-badge {
-            font-size: 0.65rem;
-            background: var(--accent-dim);
-            color: var(--accent);
-            border: 1px solid rgba(167,139,250,0.3);
-            padding: 0.1rem 0.4rem;
-            border-radius: 4px;
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
+        .repo-meta { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; }
+        .repo-badge { font-size: 0.65rem; background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(167,139,250,0.3); padding: 0.1rem 0.4rem; border-radius: 4px; }
+        .repo-age { font-size: 0.7rem; color: var(--text-muted); }
         .repo-actions { display: flex; gap: 0.4rem; flex-shrink: 0; margin-left: 0.75rem; }
 
-        .message {
-            padding: 0.625rem 0.875rem;
-            border-radius: 8px;
-            margin-bottom: 0.75rem;
-            font-size: 0.8125rem;
-        }
+        .message { padding: 0.625rem 0.875rem; border-radius: 8px; margin-bottom: 0.75rem; font-size: 0.8125rem; }
         .message.error { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.2); color: var(--error); }
         .message.info { background: var(--accent-dim); border: 1px solid rgba(167,139,250,0.2); color: var(--accent); }
 
@@ -284,6 +262,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <h1>Cortex</h1>
                 <span>RAG Dashboard</span>
             </div>
+            <span id="status-dot" class="status-dot" title="Reindexing..."></span>
         </div>
 
         <div class="tabs">
@@ -301,6 +280,12 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <label class="toggle"><input type="checkbox" id="search-notes" checked><span>Notes</span></label>
                 <label class="toggle"><input type="checkbox" id="search-code" checked><span>Code</span></label>
             </div>
+            <div class="repo-filter-row" id="repo-filter-row" style="display:none">
+                <span class="repo-filter-label">Repo:</span>
+                <select id="repo-filter">
+                    <option value="">All repos</option>
+                </select>
+            </div>
             <div id="search-results" class="results"></div>
         </div>
 
@@ -315,7 +300,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <div class="stat-card"><div class="stat-label">Code chunks</div><div class="stat-value" id="stat-code">-</div></div>
                 <div class="stat-card"><div class="stat-label">Ollama</div><div class="stat-value" id="stat-ollama">-</div></div>
             </div>
-            <div class="reindex-section">
+            <div class="section">
                 <div class="section-title">Reindex</div>
                 <div class="reindex-buttons">
                     <button id="reindex-all">Reindex All</button>
@@ -323,6 +308,12 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     <button id="reindex-code" class="secondary">Code Only</button>
                 </div>
                 <div id="reindex-status" class="status-log">No reindex running.</div>
+            </div>
+            <div class="section">
+                <div class="section-title">Recent Webhooks</div>
+                <div id="webhook-log-wrap">
+                    <div class="empty">No webhooks received yet.</div>
+                </div>
             </div>
         </div>
     </div>
@@ -346,20 +337,61 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
+        function timeAgo(iso) {
+            if (!iso) return '';
+            const diff = Math.floor((Date.now() - new Date(iso)) / 1000);
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+            return Math.floor(diff / 86400) + 'd ago';
+        }
+
+        // Tabs
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                 document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
                 tab.classList.add('active');
                 document.getElementById(tab.dataset.tab + '-panel').classList.add('active');
-                if (tab.dataset.tab === 'admin') loadStats();
+                if (tab.dataset.tab === 'admin') { loadStats(); loadWebhookLog(); }
                 if (tab.dataset.tab === 'repos') loadRepos();
             });
         });
 
+        // Header status dot — background poll every 5s
+        const statusDot = document.getElementById('status-dot');
+        async function pollStatusDot() {
+            try {
+                const data = await api('/api/status');
+                statusDot.classList.toggle('active', !!data.running);
+            } catch (_) {}
+        }
+        pollStatusDot();
+        setInterval(pollStatusDot, 5000);
+
+        // Search
         const searchForm = document.getElementById('search-form');
         const queryInput = document.getElementById('query');
         const resultsDiv = document.getElementById('search-results');
+        const codeToggle = document.getElementById('search-code');
+        const repoFilterRow = document.getElementById('repo-filter-row');
+        const repoFilterSelect = document.getElementById('repo-filter');
+
+        function updateRepoFilterVisibility() {
+            repoFilterRow.style.display = codeToggle.checked ? 'flex' : 'none';
+        }
+        codeToggle.addEventListener('change', updateRepoFilterVisibility);
+
+        // Load indexed repos into filter dropdown
+        async function loadRepoFilter() {
+            try {
+                const meta = await api('/api/repos-meta');
+                const indexed = (meta.repos || []).map(r => r.split('/')[1]);
+                repoFilterSelect.innerHTML = '<option value="">All repos</option>' +
+                    indexed.map(n => '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>').join('');
+            } catch (_) {}
+        }
+        loadRepoFilter();
 
         searchForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -367,11 +399,14 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             if (!query) return;
             const collections = [];
             if (document.getElementById('search-notes').checked) collections.push('notes');
-            if (document.getElementById('search-code').checked) collections.push('code');
+            if (codeToggle.checked) collections.push('code');
             if (!collections.length) { resultsDiv.innerHTML = '<div class="message error">Select at least one collection</div>'; return; }
+            const repoFilter = repoFilterSelect.value;
             resultsDiv.innerHTML = '<div class="empty loading">Searching...</div>';
             try {
-                const data = await api('/api/search', { method: 'POST', body: JSON.stringify({ query, collections, limit: 10 }) });
+                const body = { query, collections, limit: 10 };
+                if (repoFilter) body.repo = repoFilter;
+                const data = await api('/api/search', { method: 'POST', body: JSON.stringify(body) });
                 renderResults(data);
             } catch (err) {
                 resultsDiv.innerHTML = '<div class="message error">' + escapeHtml(err.message) + '</div>';
@@ -395,6 +430,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             }).join('');
         }
 
+        // Stats
         async function loadStats() {
             try {
                 const data = await api('/api/stats');
@@ -406,6 +442,20 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             } catch (err) { console.error('Failed to load stats:', err); }
         }
 
+        // Webhook log
+        async function loadWebhookLog() {
+            const wrap = document.getElementById('webhook-log-wrap');
+            try {
+                const data = await api('/api/webhook-log');
+                const log = data.log || [];
+                if (!log.length) { wrap.innerHTML = '<div class="empty">No webhooks received yet.</div>'; return; }
+                wrap.innerHTML = '<table class="webhook-table"><thead><tr><th>Repo</th><th>Time</th><th>Status</th></tr></thead><tbody>' +
+                    log.map(e => '<tr><td>' + escapeHtml(e.repo) + '</td><td>' + timeAgo(e.ts) + '</td><td class="' + (e.status === 'triggered' ? 'wh-triggered' : 'wh-skipped') + '">' + escapeHtml(e.status) + '</td></tr>').join('') +
+                    '</tbody></table>';
+            } catch (err) { wrap.innerHTML = '<div class="empty">Failed to load webhook log.</div>'; }
+        }
+
+        // Reindex
         let statusPoll = null;
         document.getElementById('reindex-all').addEventListener('click', () => triggerReindex(true, true));
         document.getElementById('reindex-notes').addEventListener('click', () => triggerReindex(true, false));
@@ -432,10 +482,12 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     if (data.error) text += NL + NL + 'Error: ' + data.error;
                     statusDiv.textContent = text;
                     statusDiv.scrollTop = statusDiv.scrollHeight;
+                    statusDot.classList.toggle('active', !!data.running);
                     if (data.done && !data.running) {
                         clearInterval(statusPoll); statusPoll = null;
                         statusDiv.classList.remove('status-running');
                         loadStats();
+                        loadRepoFilter();
                     }
                 } catch (err) { statusDiv.textContent = 'Error polling status: ' + err.message; }
             };
@@ -452,41 +504,41 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             }
         }).catch(() => {});
 
-        // Repos — load all GitHub repos + configured, merge into one list
+        // Repos — uses /api/repos-meta for indexed_at + /api/github/repos for full list
         async function loadRepos() {
             const listDiv = document.getElementById('repo-list');
             listDiv.innerHTML = '<div class="empty loading">Loading repos...</div>';
             try {
-                const [configRes, ghRes] = await Promise.allSettled([
-                    api('/api/repos'),
+                const [metaRes, ghRes] = await Promise.allSettled([
+                    api('/api/repos-meta'),
                     api('/api/github/repos')
                 ]);
-                const indexed = configRes.status === 'fulfilled' ? (configRes.value.repos || []) : [];
-                const all = ghRes.status === 'fulfilled' ? (ghRes.value.repos || []) : indexed;
-                renderRepos(all, indexed);
+                const meta = metaRes.status === 'fulfilled' ? metaRes.value : { repos: [], indexed_at: {} };
+                const indexedList = meta.repos || [];
+                const indexedAt = meta.indexed_at || {};
+                const ghRepos = ghRes.status === 'fulfilled' ? (ghRes.value.repos || []) : indexedList;
+                renderRepos(ghRepos, indexedList, indexedAt);
             } catch (err) {
                 listDiv.innerHTML = '<div class="message error">' + escapeHtml(err.message) + '</div>';
             }
         }
 
-        function renderRepos(allRepos, indexedRepos) {
+        function renderRepos(allRepos, indexedList, indexedAt) {
             const listDiv = document.getElementById('repo-list');
             if (!allRepos.length) { listDiv.innerHTML = '<div class="empty">No repos found.</div>'; return; }
-            const indexedSet = new Set(indexedRepos);
-
-            // Sort: indexed first, then alphabetical
+            const indexedSet = new Set(indexedList);
             const sorted = [...allRepos].sort((a, b) => {
                 const ai = indexedSet.has(a) ? 0 : 1;
                 const bi = indexedSet.has(b) ? 0 : 1;
                 return ai - bi || a.localeCompare(b);
             });
-
             listDiv.innerHTML = sorted.map(repo => {
                 const isIndexed = indexedSet.has(repo);
+                const name = repo.split('/')[1];
+                const age = isIndexed && indexedAt[name] ? timeAgo(indexedAt[name]) : '';
                 return '<div class="repo-item' + (isIndexed ? ' indexed' : '') + '" data-repo="' + escapeHtml(repo) + '">' +
-                    '<div class="repo-info">' +
-                    '<span class="repo-name">' + escapeHtml(repo) + '</span>' +
-                    (isIndexed ? '<span class="repo-badge">indexed</span>' : '') +
+                    '<div class="repo-info"><span class="repo-name">' + escapeHtml(repo) + '</span>' +
+                    (isIndexed ? '<div class="repo-meta"><span class="repo-badge">indexed</span>' + (age ? '<span class="repo-age">' + escapeHtml(age) + '</span>' : '') + '</div>' : '') +
                     '</div>' +
                     '<div class="repo-actions">' +
                     (isIndexed
@@ -512,8 +564,9 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     const repo = btn.closest('.repo-item').dataset.repo;
                     try {
                         const data = await api('/api/repos/' + encodeURIComponent(repo), { method: 'DELETE' });
-                        renderRepos(allRepos, data.repos || []);
+                        renderRepos(allRepos, data.repos || [], indexedAt);
                         showRepoMsg('Removed ' + repo.split('/')[1] + ' from index', 'info');
+                        loadRepoFilter();
                     } catch (err) { showRepoMsg(err.message, 'error'); }
                 });
             });
@@ -524,8 +577,9 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     btn.disabled = true; btn.textContent = '...';
                     try {
                         const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo }) });
-                        renderRepos(allRepos, data.repos || []);
+                        renderRepos(allRepos, data.repos || [], indexedAt);
                         showRepoMsg('Added ' + repo.split('/')[1] + ' to index', 'info');
+                        loadRepoFilter();
                     } catch (err) { showRepoMsg(err.message, 'error'); btn.disabled = false; btn.textContent = 'Add to index'; }
                 });
             });
@@ -557,9 +611,12 @@ async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONRespons
         return JSONResponse({"error": "Query required"}, status_code=400)
     collections = body.get("collections", ["notes", "code"])
     limit = min(body.get("limit", 10), 50)
+    repo_filter = body.get("repo", "").strip()
+
     client = QdrantClient(url=qdrant_url)
     vector = embed_fn(query)
     result = {}
+
     if "notes" in collections:
         try:
             points = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
@@ -568,9 +625,11 @@ async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONRespons
                                  "score": round(p.score, 4)} for p in points]
         except Exception as e:
             result["notes"] = []; result["notes_error"] = str(e)
+
     if "code" in collections:
         try:
-            points = client.query_points("code", query=vector, limit=limit, with_payload=True).points
+            q_filter = Filter(must=[FieldCondition(key="repo", match=MatchValue(value=repo_filter))]) if repo_filter else None
+            points = client.query_points("code", query=vector, limit=limit, with_payload=True, query_filter=q_filter).points
             result["code"] = [{"repo": p.payload.get("repo", ""), "file": p.payload.get("file", ""),
                                 "start_line": p.payload.get("start_line", 0), "end_line": p.payload.get("end_line", 0),
                                 "language": p.payload.get("language", ""), "text": p.payload.get("text", ""),
@@ -578,6 +637,7 @@ async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONRespons
                                for p in points]
         except Exception as e:
             result["code"] = []; result["code_error"] = str(e)
+
     return JSONResponse(result)
 
 
