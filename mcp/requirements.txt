@@ -4,8 +4,3 @@ qdrant-client
 watchdog
 uvicorn
 starlette
-tree-sitter>=0.22
-tree-sitter-python
-tree-sitter-javascript
-tree-sitter-typescript
-tree-sitter-kotlin
