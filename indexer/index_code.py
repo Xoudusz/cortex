@@ -47,13 +47,17 @@ DEFAULT_REPOS = [
 
 
 def _load_repos() -> list[str]:
-    """Load repos from config file, fall back to DEFAULT_REPOS."""
+    """Load repos from config file (flat array or {repos, indexed_at} dict), fall back to DEFAULT_REPOS."""
     try:
         if os.path.exists(REPOS_CONFIG):
             with open(REPOS_CONFIG) as f:
                 data = json.load(f)
             if isinstance(data, list) and data:
                 return data
+            if isinstance(data, dict):
+                repos = data.get("repos", [])
+                if repos:
+                    return repos
     except Exception as e:
         print(f"Warning: could not read repos config {REPOS_CONFIG}: {e}")
     return list(DEFAULT_REPOS)
