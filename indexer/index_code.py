@@ -25,13 +25,14 @@ MAX_CHUNK_LINES = 80
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
-CODE_EXTS = {".js", ".ts", ".tsx", ".jsx", ".svelte", ".py", ".java", ".go", ".rs", ".css", ".html", ".kt", ".kts", ".gd"}
+CODE_EXTS = {".js", ".ts", ".tsx", ".jsx", ".svelte", ".py", ".java", ".go", ".rs", ".css", ".html", ".kt", ".kts", ".gd", ".yml", ".yaml"}
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", ".svelte-kit", "__pycache__", ".gradle", "target"}
 LANG_MAP  = {
     ".js": "javascript", ".ts": "typescript", ".tsx": "typescript",
     ".jsx": "javascript", ".svelte": "svelte", ".py": "python",
     ".java": "java", ".go": "go", ".rs": "rust", ".css": "css", ".html": "html",
     ".kt": "kotlin", ".kts": "kotlin", ".gd": "gdscript",
+    ".yml": "yaml", ".yaml": "yaml",
 }
 
 DEFAULT_REPOS = [
