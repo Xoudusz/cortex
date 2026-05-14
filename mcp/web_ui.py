@@ -5,199 +5,309 @@ from qdrant_client import QdrantClient
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
+FAVICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><line x1='12' y1='3' x2='4' y2='9' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='12' y1='3' x2='20' y2='9' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='4' y1='9' x2='4' y2='15' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='20' y1='9' x2='20' y2='15' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='4' y1='15' x2='12' y2='21' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='20' y1='15' x2='12' y2='21' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='4' y1='9' x2='12' y2='12' stroke='%237c3aed' stroke-width='1' stroke-linecap='round'/><line x1='20' y1='9' x2='12' y2='12' stroke='%237c3aed' stroke-width='1' stroke-linecap='round'/><line x1='4' y1='15' x2='12' y2='12' stroke='%237c3aed' stroke-width='1' stroke-linecap='round'/><line x1='20' y1='15' x2='12' y2='12' stroke='%237c3aed' stroke-width='1' stroke-linecap='round'/><circle cx='12' cy='3' r='2.5' fill='%23a78bfa'/><circle cx='4' cy='9' r='2' fill='%238b5cf6'/><circle cx='20' cy='9' r='2' fill='%238b5cf6'/><circle cx='12' cy='12' r='2.5' fill='%23a78bfa'/><circle cx='4' cy='15' r='2' fill='%238b5cf6'/><circle cx='20' cy='15' r='2' fill='%238b5cf6'/><circle cx='12' cy='21' r='2.5' fill='%23a78bfa'/></svg>"
+
+LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" class="logo-svg">
+  <defs>
+    <linearGradient id="cg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <line x1="12" y1="3" x2="4" y2="9" stroke="#8b5cf6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="12" y1="3" x2="20" y2="9" stroke="#8b5cf6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="4" y1="9" x2="4" y2="15" stroke="#8b5cf6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="20" y1="9" x2="20" y2="15" stroke="#8b5cf6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="4" y1="15" x2="12" y2="21" stroke="#8b5cf6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="20" y1="15" x2="12" y2="21" stroke="#8b5cf6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="4" y1="9" x2="12" y2="12" stroke="#7c3aed" stroke-width="1" stroke-linecap="round"/>
+  <line x1="20" y1="9" x2="12" y2="12" stroke="#7c3aed" stroke-width="1" stroke-linecap="round"/>
+  <line x1="4" y1="15" x2="12" y2="12" stroke="#7c3aed" stroke-width="1" stroke-linecap="round"/>
+  <line x1="20" y1="15" x2="12" y2="12" stroke="#7c3aed" stroke-width="1" stroke-linecap="round"/>
+  <circle cx="12" cy="3" r="2.5" fill="url(#cg)"/>
+  <circle cx="4" cy="9" r="2" fill="#8b5cf6"/>
+  <circle cx="20" cy="9" r="2" fill="#8b5cf6"/>
+  <circle cx="12" cy="12" r="2.5" fill="url(#cg)"/>
+  <circle cx="4" cy="15" r="2" fill="#8b5cf6"/>
+  <circle cx="20" cy="15" r="2" fill="#8b5cf6"/>
+  <circle cx="12" cy="21" r="2.5" fill="url(#cg)"/>
+</svg>"""
+
 UI_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cortex</title>
+    <link rel="icon" type="image/svg+xml" href="{favicon}">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-            --bg: #0d1117;
-            --surface: #161b22;
-            --border: #30363d;
-            --text: #c9d1d9;
-            --text-muted: #8b949e;
-            --accent: #58a6ff;
-            --accent-hover: #79b8ff;
-            --success: #3fb950;
-            --error: #f85149;
-        }
-        body {
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        :root {{
+            --bg: #0d0f14;
+            --surface: #13161e;
+            --surface-2: #1a1f2e;
+            --border: #252a38;
+            --text: #e2e8f0;
+            --text-muted: #7c8698;
+            --accent: #a78bfa;
+            --accent-hover: #c084fc;
+            --accent-dim: rgba(167, 139, 250, 0.12);
+            --accent-glow: rgba(167, 139, 250, 0.2);
+            --success: #34d399;
+            --error: #f87171;
+        }}
+        body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
-            padding: 1rem;
-        }
-        .container { max-width: 900px; margin: 0 auto; }
-        h1 { font-size: 1.5rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
-        h1 span { color: var(--text-muted); font-weight: normal; font-size: 0.875rem; }
+            padding: 1.5rem 1rem;
+        }}
+        .container {{ max-width: 900px; margin: 0 auto; }}
 
-        .tabs {
+        /* Header */
+        .header {{
             display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1.25rem;
             border-bottom: 1px solid var(--border);
-            padding-bottom: 0.5rem;
-        }
-        .tab {
+        }}
+        .logo-svg {{
+            width: 28px;
+            height: 28px;
+            flex-shrink: 0;
+        }}
+        .header-text h1 {{
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            background: linear-gradient(135deg, #c084fc, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }}
+        .header-text span {{
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: normal;
+        }}
+
+        /* Tabs */
+        .tabs {{
+            display: flex;
+            gap: 0.25rem;
+            margin-bottom: 1.5rem;
+            background: var(--surface);
+            padding: 0.25rem;
+            border-radius: 8px;
+            width: fit-content;
+        }}
+        .tab {{
             background: transparent;
             border: none;
             color: var(--text-muted);
-            padding: 0.5rem 1rem;
+            padding: 0.4rem 1rem;
             cursor: pointer;
             border-radius: 6px;
-            font-size: 0.875rem;
-        }
-        .tab:hover { background: var(--surface); color: var(--text); }
-        .tab.active { background: var(--surface); color: var(--accent); }
+            font-size: 0.8125rem;
+            font-weight: 500;
+            transition: all 0.15s;
+        }}
+        .tab:hover {{ color: var(--text); }}
+        .tab.active {{
+            background: var(--accent-dim);
+            color: var(--accent);
+            box-shadow: inset 0 0 0 1px rgba(167,139,250,0.25);
+        }}
 
-        .panel { display: none; }
-        .panel.active { display: block; }
+        .panel {{ display: none; }}
+        .panel.active {{ display: block; }}
 
-        .search-form { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-        input[type="text"] {
+        /* Inputs */
+        .search-form {{ display: flex; gap: 0.5rem; margin-bottom: 1rem; }}
+        input[type="text"] {{
             flex: 1;
-            padding: 0.75rem 1rem;
+            padding: 0.625rem 1rem;
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 6px;
+            border-radius: 8px;
             color: var(--text);
             font-size: 0.875rem;
-        }
-        input[type="text"]:focus { outline: none; border-color: var(--accent); }
-        input[type="text"]::placeholder { color: var(--text-muted); }
+            transition: border-color 0.15s;
+        }}
+        input[type="text"]:focus {{ outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }}
+        input[type="text"]::placeholder {{ color: var(--text-muted); }}
 
-        select {
+        select {{
             width: 100%;
-            padding: 0.75rem 1rem;
+            padding: 0.625rem 1rem;
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 6px;
+            border-radius: 8px;
             color: var(--text);
             font-size: 0.875rem;
             margin-bottom: 0.5rem;
             cursor: pointer;
-        }
-        select:focus { outline: none; border-color: var(--accent); }
+        }}
+        select:focus {{ outline: none; border-color: var(--accent); }}
 
-        button {
-            padding: 0.75rem 1.25rem;
+        /* Buttons */
+        button {{
+            padding: 0.625rem 1.25rem;
             background: var(--accent);
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             color: #fff;
             cursor: pointer;
             font-size: 0.875rem;
             font-weight: 500;
-        }
-        button:hover { background: var(--accent-hover); }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        button.secondary {
+            transition: all 0.15s;
+        }}
+        button:hover {{ background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 4px 12px var(--accent-glow); }}
+        button:active {{ transform: translateY(0); }}
+        button:disabled {{ opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }}
+        button.secondary {{
             background: var(--surface);
             border: 1px solid var(--border);
-            color: var(--text);
-        }
-        button.secondary:hover { border-color: var(--accent); color: var(--accent); }
-        button.small { padding: 0.375rem 0.75rem; font-size: 0.75rem; }
-        button.danger {
-            background: rgba(248, 81, 73, 0.12);
-            border: 1px solid rgba(248, 81, 73, 0.3);
+            color: var(--text-muted);
+        }}
+        button.secondary:hover {{ border-color: var(--accent); color: var(--accent); box-shadow: none; }}
+        button.small {{ padding: 0.3rem 0.7rem; font-size: 0.75rem; }}
+        button.danger {{
+            background: rgba(248, 113, 113, 0.1);
+            border: 1px solid rgba(248, 113, 113, 0.3);
             color: var(--error);
-        }
-        button.danger:hover { background: rgba(248, 81, 73, 0.22); }
+        }}
+        button.danger:hover {{ background: rgba(248, 113, 113, 0.2); box-shadow: none; }}
 
-        .toggles { display: flex; gap: 1rem; margin-bottom: 1rem; }
-        .toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text-muted); }
-        .toggle input { accent-color: var(--accent); }
+        /* Toggles */
+        .toggles {{ display: flex; gap: 1.25rem; margin-bottom: 1.25rem; }}
+        .toggle {{ display: flex; align-items: center; gap: 0.4rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer; }}
+        .toggle input {{ accent-color: var(--accent); }}
 
-        .results { display: flex; flex-direction: column; gap: 0.75rem; }
-        .result-card {
+        /* Results */
+        .results {{ display: flex; flex-direction: column; gap: 0.625rem; }}
+        .result-card {{
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 8px;
+            border-radius: 10px;
             padding: 1rem;
-        }
-        .result-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem; }
-        .result-title { font-weight: 600; font-size: 0.875rem; color: var(--accent); word-break: break-all; }
-        .result-meta { font-size: 0.75rem; color: var(--text-muted); text-align: right; }
-        .result-content {
-            font-size: 0.8125rem;
+            transition: border-color 0.15s;
+        }}
+        .result-card:hover {{ border-color: rgba(167,139,250,0.3); }}
+        .result-header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem; gap: 1rem; }}
+        .result-title {{ font-weight: 600; font-size: 0.8125rem; color: var(--accent); word-break: break-all; line-height: 1.4; }}
+        .result-meta {{ font-size: 0.7rem; color: var(--text-muted); text-align: right; white-space: nowrap; flex-shrink: 0; }}
+        .result-content {{
+            font-size: 0.8rem;
             color: var(--text-muted);
             white-space: pre-wrap;
-            max-height: 200px;
+            max-height: 180px;
             overflow-y: auto;
             background: var(--bg);
-            padding: 0.75rem;
+            padding: 0.625rem 0.75rem;
+            border-radius: 6px;
+            font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+            line-height: 1.5;
+        }}
+        .result-tags {{ margin-top: 0.5rem; display: flex; gap: 0.25rem; flex-wrap: wrap; }}
+        .tag {{
+            background: var(--accent-dim);
+            border: 1px solid rgba(167,139,250,0.2);
+            padding: 0.1rem 0.5rem;
             border-radius: 4px;
-            font-family: 'SF Mono', Consolas, monospace;
-        }
-        .result-tags { margin-top: 0.5rem; display: flex; gap: 0.25rem; flex-wrap: wrap; }
-        .tag { background: var(--bg); padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.75rem; color: var(--text-muted); }
+            font-size: 0.7rem;
+            color: var(--accent);
+        }}
 
-        .stats-grid {
+        /* Stats */
+        .stats-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.75rem;
             margin-bottom: 1.5rem;
-        }
-        .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
-        .stat-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; }
-        .stat-value { font-size: 1.5rem; font-weight: 600; }
-        .stat-value.ok { color: var(--success); }
-        .stat-value.error { color: var(--error); }
-
-        .reindex-section { margin-top: 1.5rem; }
-        .reindex-buttons { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
-        .status-log {
+        }}
+        .stat-card {{
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem;
-            font-family: 'SF Mono', Consolas, monospace;
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+        }}
+        .stat-label {{ font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.375rem; text-transform: uppercase; letter-spacing: 0.05em; }}
+        .stat-value {{ font-size: 1.75rem; font-weight: 700; }}
+        .stat-value.ok {{ color: var(--success); }}
+        .stat-value.error {{ color: var(--error); }}
+
+        /* Reindex */
+        .reindex-section {{ margin-top: 1.5rem; }}
+        .section-title {{ font-size: 0.875rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem; }}
+        .reindex-buttons {{ display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }}
+        .status-log {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.875rem 1rem;
+            font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
             font-size: 0.75rem;
-            max-height: 300px;
+            max-height: 280px;
             overflow-y: auto;
             white-space: pre-wrap;
             color: var(--text-muted);
-        }
-        .status-running { border-color: var(--accent); }
+            line-height: 1.5;
+        }}
+        .status-running {{ border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }}
 
-        .repo-item {
+        /* Repos */
+        .repo-item {{
             display: flex;
             justify-content: space-between;
             align-items: center;
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 0.75rem 1rem;
-            margin-bottom: 0.5rem;
-        }
-        .repo-name { font-size: 0.875rem; font-family: 'SF Mono', Consolas, monospace; }
-        .repo-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
-        .add-repo-section { margin-top: 1.5rem; }
-        .add-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+            padding: 0.625rem 0.875rem;
+            margin-bottom: 0.4rem;
+            transition: border-color 0.15s;
+        }}
+        .repo-item:hover {{ border-color: rgba(167,139,250,0.25); }}
+        .repo-name {{ font-size: 0.8125rem; font-family: 'SF Mono', Consolas, monospace; color: var(--text); }}
+        .repo-actions {{ display: flex; gap: 0.4rem; flex-shrink: 0; }}
+        .add-repo-section {{ margin-top: 1.5rem; }}
+        .add-row {{ display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }}
 
-        .message {
-            padding: 0.75rem 1rem;
-            border-radius: 6px;
-            margin-bottom: 1rem;
-            font-size: 0.875rem;
-        }
-        .message.error { background: rgba(248, 81, 73, 0.1); color: var(--error); }
-        .message.info { background: rgba(88, 166, 255, 0.1); color: var(--accent); }
+        /* Messages */
+        .message {{
+            padding: 0.625rem 0.875rem;
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+            font-size: 0.8125rem;
+        }}
+        .message.error {{ background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248,113,113,0.2); color: var(--error); }}
+        .message.info {{ background: var(--accent-dim); border: 1px solid rgba(167,139,250,0.2); color: var(--accent); }}
 
-        .empty { color: var(--text-muted); font-style: italic; }
-        .loading { opacity: 0.6; }
-        a { color: var(--accent); text-decoration: none; }
-        a:hover { text-decoration: underline; }
+        .empty {{ color: var(--text-muted); font-style: italic; padding: 0.5rem 0; }}
+        .loading {{ opacity: 0.5; }}
+        a {{ color: var(--accent); text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+
+        /* Scrollbars */
+        ::-webkit-scrollbar {{ width: 6px; height: 6px; }}
+        ::-webkit-scrollbar-track {{ background: transparent; }}
+        ::-webkit-scrollbar-thumb {{ background: var(--border); border-radius: 3px; }}
+        ::-webkit-scrollbar-thumb:hover {{ background: var(--text-muted); }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Cortex <span>RAG Dashboard</span></h1>
+        <div class="header">
+            {logo}
+            <div class="header-text">
+                <h1>Cortex</h1>
+                <span>RAG Dashboard</span>
+            </div>
+        </div>
 
         <div class="tabs">
             <button class="tab active" data-tab="search">Search</button>
@@ -228,7 +338,7 @@ UI_HTML = """<!DOCTYPE html>
         <div id="repos-panel" class="panel">
             <div id="repo-list"></div>
             <div class="add-repo-section">
-                <h3 style="margin-bottom: 0.75rem; font-size: 1rem;">Add Repo</h3>
+                <div class="section-title">Add Repo</div>
                 <div class="add-row">
                     <input type="text" id="repo-input" placeholder="Xoudusz/repo-name">
                     <button id="repo-add-btn">Add</button>
@@ -252,16 +362,16 @@ UI_HTML = """<!DOCTYPE html>
                     <div class="stat-value" id="stat-notes">—</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Code chunks indexed</div>
+                    <div class="stat-label">Code chunks</div>
                     <div class="stat-value" id="stat-code">—</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Ollama status</div>
+                    <div class="stat-label">Ollama</div>
                     <div class="stat-value" id="stat-ollama">—</div>
                 </div>
             </div>
             <div class="reindex-section">
-                <h3 style="margin-bottom: 0.75rem; font-size: 1rem;">Reindex</h3>
+                <div class="section-title">Reindex</div>
                 <div class="reindex-buttons">
                     <button id="reindex-all">Reindex All</button>
                     <button id="reindex-notes" class="secondary">Notes Only</button>
@@ -273,40 +383,40 @@ UI_HTML = """<!DOCTYPE html>
     </div>
 
     <script>
-        async function api(path, options = {}) {
-            const res = await fetch(path, {
+        async function api(path, options = {}) {{
+            const res = await fetch(path, {{
                 ...options,
-                headers: { 'Content-Type': 'application/json', ...options.headers }
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ error: res.statusText }));
+                headers: {{ 'Content-Type': 'application/json', ...options.headers }}
+            }});
+            if (!res.ok) {{
+                const err = await res.json().catch(() => ({{ error: res.statusText }}));
                 throw new Error(err.error || res.statusText);
-            }
+            }}
             return res.json();
-        }
+        }}
 
-        function escapeHtml(str) {
+        function escapeHtml(str) {{
             return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        }
+        }}
 
         // Tabs
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(tab => {{
+            tab.addEventListener('click', () => {{
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                 document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
                 tab.classList.add('active');
                 document.getElementById(tab.dataset.tab + '-panel').classList.add('active');
                 if (tab.dataset.tab === 'admin') loadStats();
                 if (tab.dataset.tab === 'repos') loadRepos();
-            });
-        });
+            }});
+        }});
 
         // Search
         const searchForm = document.getElementById('search-form');
         const queryInput = document.getElementById('query');
         const resultsDiv = document.getElementById('search-results');
 
-        searchForm.addEventListener('submit', async (e) => {
+        searchForm.addEventListener('submit', async (e) => {{
             e.preventDefault();
             const query = queryInput.value.trim();
             if (!query) return;
@@ -314,66 +424,66 @@ UI_HTML = """<!DOCTYPE html>
             const collections = [];
             if (document.getElementById('search-notes').checked) collections.push('notes');
             if (document.getElementById('search-code').checked) collections.push('code');
-            if (!collections.length) {
+            if (!collections.length) {{
                 resultsDiv.innerHTML = '<div class="message error">Select at least one collection</div>';
                 return;
-            }
+            }}
 
             resultsDiv.innerHTML = '<div class="empty loading">Searching...</div>';
-            try {
-                const data = await api('/api/search', {
+            try {{
+                const data = await api('/api/search', {{
                     method: 'POST',
-                    body: JSON.stringify({ query, collections, limit: 10 })
-                });
+                    body: JSON.stringify({{ query, collections, limit: 10 }})
+                }});
                 renderResults(data);
-            } catch (err) {
+            }} catch (err) {{
                 resultsDiv.innerHTML = '<div class="message error">' + escapeHtml(err.message) + '</div>';
-            }
-        });
+            }}
+        }});
 
-        function renderResults(data) {
+        function renderResults(data) {{
             const all = [
-                ...(data.notes || []).map(r => ({ ...r, type: 'note' })),
-                ...(data.code || []).map(r => ({ ...r, type: 'code' }))
+                ...(data.notes || []).map(r => ({{ ...r, type: 'note' }})),
+                ...(data.code || []).map(r => ({{ ...r, type: 'code' }}))
             ].sort((a, b) => b.score - a.score);
 
-            if (!all.length) { resultsDiv.innerHTML = '<div class="empty">No results found.</div>'; return; }
+            if (!all.length) {{ resultsDiv.innerHTML = '<div class="empty">No results found.</div>'; return; }}
 
-            resultsDiv.innerHTML = all.map(r => {
-                if (r.type === 'note') {
+            resultsDiv.innerHTML = all.map(r => {{
+                if (r.type === 'note') {{
                     const tags = (r.tags || []).map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('');
                     return '<div class="result-card">' +
                         '<div class="result-header">' +
                         '<div class="result-title">' + escapeHtml(r.file) + ' › ' + escapeHtml(r.heading) + '</div>' +
-                        '<div class="result-meta">score: ' + r.score.toFixed(3) + '</div>' +
+                        '<div class="result-meta">score ' + r.score.toFixed(3) + '</div>' +
                         '</div>' +
                         '<div class="result-content">' + escapeHtml(r.text) + '</div>' +
                         (tags ? '<div class="result-tags">' + tags + '</div>' : '') +
                         '</div>';
-                } else {
-                    const link = r.github_url ? '<a href="' + escapeHtml(r.github_url) + '" target="_blank">GitHub</a>' : '';
+                }} else {{
+                    const link = r.github_url ? '<a href="' + escapeHtml(r.github_url) + '" target="_blank">↗ GitHub</a>' : '';
                     return '<div class="result-card">' +
                         '<div class="result-header">' +
-                        '<div class="result-title">' + escapeHtml(r.repo) + '/' + escapeHtml(r.file) + ':' + r.start_line + '-' + r.end_line + '</div>' +
-                        '<div class="result-meta">' + escapeHtml(r.language || '') + ' • score: ' + r.score.toFixed(3) + (link ? ' • ' + link : '') + '</div>' +
+                        '<div class="result-title">' + escapeHtml(r.repo) + ' / ' + escapeHtml(r.file) + ' :' + r.start_line + '-' + r.end_line + '</div>' +
+                        '<div class="result-meta">' + escapeHtml(r.language || '') + ' · ' + r.score.toFixed(3) + (link ? ' · ' + link : '') + '</div>' +
                         '</div>' +
                         '<div class="result-content">' + escapeHtml(r.text) + '</div>' +
                         '</div>';
-                }
-            }).join('');
-        }
+                }}
+            }}).join('');
+        }}
 
         // Stats
-        async function loadStats() {
-            try {
+        async function loadStats() {{
+            try {{
                 const data = await api('/api/stats');
                 document.getElementById('stat-notes').textContent = data.notes?.points_count?.toLocaleString() ?? '—';
                 document.getElementById('stat-code').textContent = data.code?.points_count?.toLocaleString() ?? '—';
                 const ollama = document.getElementById('stat-ollama');
-                ollama.textContent = data.ollama?.status || 'error';
+                ollama.textContent = data.ollama?.status === 'ok' ? '✓' : '✗';
                 ollama.className = 'stat-value ' + (data.ollama?.status === 'ok' ? 'ok' : 'error');
-            } catch (err) { console.error('Failed to load stats:', err); }
-        }
+            }} catch (err) {{ console.error('Failed to load stats:', err); }}
+        }}
 
         // Reindex
         let statusPoll = null;
@@ -381,72 +491,69 @@ UI_HTML = """<!DOCTYPE html>
         document.getElementById('reindex-notes').addEventListener('click', () => triggerReindex(true, false));
         document.getElementById('reindex-code').addEventListener('click', () => triggerReindex(false, true));
 
-        async function triggerReindex(notes, code, repo) {
-            try {
-                const data = await api('/api/reindex', {
+        async function triggerReindex(notes, code, repo) {{
+            try {{
+                const data = await api('/api/reindex', {{
                     method: 'POST',
-                    body: JSON.stringify({ notes, code, repo: repo || '' })
-                });
+                    body: JSON.stringify({{ notes, code, repo: repo || '' }})
+                }});
                 if (data.status === 'started' || data.status === 'already_running') pollStatus();
-            } catch (err) {
+            }} catch (err) {{
                 document.getElementById('reindex-status').textContent = 'Error: ' + err.message;
-            }
-        }
+            }}
+        }}
 
-        async function pollStatus() {
+        async function pollStatus() {{
             if (statusPoll) clearInterval(statusPoll);
             const statusDiv = document.getElementById('reindex-status');
             statusDiv.classList.add('status-running');
 
-            const update = async () => {
-                try {
+            const update = async () => {{
+                try {{
                     const data = await api('/api/status');
                     let text = 'Status: ' + (data.running ? 'running' : 'done') + ' (' + Math.round(data.elapsed_seconds) + 's)\\n\\n';
                     text += (data.output || []).join('\\n');
                     if (data.error) text += '\\n\\nError: ' + data.error;
                     statusDiv.textContent = text;
                     statusDiv.scrollTop = statusDiv.scrollHeight;
-                    if (data.done && !data.running) {
+                    if (data.done && !data.running) {{
                         clearInterval(statusPoll);
                         statusPoll = null;
                         statusDiv.classList.remove('status-running');
                         loadStats();
-                    }
-                } catch (err) {
+                    }}
+                }} catch (err) {{
                     statusDiv.textContent = 'Error polling status: ' + err.message;
-                }
-            };
+                }}
+            }};
             await update();
             statusPoll = setInterval(update, 2000);
-        }
+        }}
 
-        api('/api/status').then(data => {
+        api('/api/status').then(data => {{
             if (data.running) pollStatus();
-            else if (data.done) {
+            else if (data.done) {{
                 let text = 'Last run: done (' + Math.round(data.elapsed_seconds) + 's)\\n\\n';
                 text += (data.output || []).join('\\n');
                 document.getElementById('reindex-status').textContent = text;
-            }
-        }).catch(() => {});
+            }}
+        }}).catch(() => {{}});
 
         // Repos
-        async function loadRepos() {
+        async function loadRepos() {{
             const listDiv = document.getElementById('repo-list');
             listDiv.innerHTML = '<div class="empty loading">Loading...</div>';
-            try {
+            try {{
                 const data = await api('/api/repos');
                 renderRepos(data.repos || []);
-            } catch (err) {
+            }} catch (err) {{
                 listDiv.innerHTML = '<div class="message error">' + escapeHtml(err.message) + '</div>';
-            }
-        }
+            }}
+        }}
 
-        function renderRepos(repos) {
+        function renderRepos(repos) {{
             const listDiv = document.getElementById('repo-list');
-            if (!repos.length) {
-                listDiv.innerHTML = '<div class="empty">No repos configured.</div>';
-                return;
-            }
+            if (!repos.length) {{ listDiv.innerHTML = '<div class="empty">No repos configured.</div>'; return; }}
             listDiv.innerHTML = repos.map(repo =>
                 '<div class="repo-item" data-repo="' + escapeHtml(repo) + '">' +
                 '<span class="repo-name">' + escapeHtml(repo) + '</span>' +
@@ -456,93 +563,77 @@ UI_HTML = """<!DOCTYPE html>
                 '</div></div>'
             ).join('');
 
-            listDiv.querySelectorAll('.repo-reindex-btn').forEach(btn => {
-                btn.addEventListener('click', async () => {
+            listDiv.querySelectorAll('.repo-reindex-btn').forEach(btn => {{
+                btn.addEventListener('click', async () => {{
                     const repo = btn.closest('.repo-item').dataset.repo;
                     const name = repo.split('/')[1];
-                    btn.disabled = true;
-                    btn.textContent = '...';
-                    try {
+                    btn.disabled = true; btn.textContent = '...';
+                    try {{
                         await triggerReindex(false, true, name);
                         showRepoMsg('Reindexing ' + name + '… check Admin tab.', 'info');
-                    } catch (err) {
-                        showRepoMsg(err.message, 'error');
-                    } finally {
-                        btn.disabled = false;
-                        btn.textContent = 'Reindex';
-                    }
-                });
-            });
+                    }} catch (err) {{ showRepoMsg(err.message, 'error'); }}
+                    finally {{ btn.disabled = false; btn.textContent = 'Reindex'; }}
+                }});
+            }});
 
-            listDiv.querySelectorAll('.repo-remove-btn').forEach(btn => {
-                btn.addEventListener('click', async () => {
+            listDiv.querySelectorAll('.repo-remove-btn').forEach(btn => {{
+                btn.addEventListener('click', async () => {{
                     const repo = btn.closest('.repo-item').dataset.repo;
-                    try {
-                        const data = await api('/api/repos/' + encodeURIComponent(repo), { method: 'DELETE' });
+                    try {{
+                        const data = await api('/api/repos/' + encodeURIComponent(repo), {{ method: 'DELETE' }});
                         renderRepos(data.repos || []);
                         showRepoMsg('Removed ' + repo, 'info');
-                    } catch (err) {
-                        showRepoMsg(err.message, 'error');
-                    }
-                });
-            });
-        }
+                    }} catch (err) {{ showRepoMsg(err.message, 'error'); }}
+                }});
+            }});
+        }}
 
-        function showRepoMsg(msg, type) {
+        function showRepoMsg(msg, type) {{
             const div = document.getElementById('repo-message');
             div.innerHTML = '<div class="message ' + type + '">' + escapeHtml(msg) + '</div>';
-            setTimeout(() => { div.innerHTML = ''; }, 4000);
-        }
+            setTimeout(() => {{ div.innerHTML = ''; }}, 4000);
+        }}
 
-        document.getElementById('repo-add-btn').addEventListener('click', async () => {
+        document.getElementById('repo-add-btn').addEventListener('click', async () => {{
             const val = document.getElementById('repo-input').value.trim();
             if (!val) return;
-            try {
-                const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo: val }) });
+            try {{
+                const data = await api('/api/repos', {{ method: 'POST', body: JSON.stringify({{ repo: val }}) }});
                 document.getElementById('repo-input').value = '';
                 renderRepos(data.repos || []);
                 showRepoMsg('Added ' + val, 'info');
-            } catch (err) {
-                showRepoMsg(err.message, 'error');
-            }
-        });
+            }} catch (err) {{ showRepoMsg(err.message, 'error'); }}
+        }});
 
-        document.getElementById('repo-input').addEventListener('keydown', e => {
+        document.getElementById('repo-input').addEventListener('keydown', e => {{
             if (e.key === 'Enter') document.getElementById('repo-add-btn').click();
-        });
+        }});
 
-        document.getElementById('load-github-repos-btn').addEventListener('click', async () => {
+        document.getElementById('load-github-repos-btn').addEventListener('click', async () => {{
             const btn = document.getElementById('load-github-repos-btn');
-            btn.disabled = true;
-            btn.textContent = 'Loading...';
-            try {
+            btn.disabled = true; btn.textContent = 'Loading...';
+            try {{
                 const data = await api('/api/github/repos');
                 const select = document.getElementById('github-repo-select');
                 select.innerHTML = '<option value="">Select a repo...</option>' +
                     (data.repos || []).map(r => '<option value="' + escapeHtml(r) + '">' + escapeHtml(r) + '</option>').join('');
                 document.getElementById('github-repo-picker').style.display = 'block';
-            } catch (err) {
-                showRepoMsg(err.message, 'error');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Load from GitHub';
-            }
-        });
+            }} catch (err) {{ showRepoMsg(err.message, 'error'); }}
+            finally {{ btn.disabled = false; btn.textContent = 'Load from GitHub'; }}
+        }});
 
-        document.getElementById('github-repo-add-btn').addEventListener('click', async () => {
+        document.getElementById('github-repo-add-btn').addEventListener('click', async () => {{
             const val = document.getElementById('github-repo-select').value;
             if (!val) return;
-            try {
-                const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo: val }) });
+            try {{
+                const data = await api('/api/repos', {{ method: 'POST', body: JSON.stringify({{ repo: val }}) }});
                 renderRepos(data.repos || []);
                 showRepoMsg('Added ' + val, 'info');
-            } catch (err) {
-                showRepoMsg(err.message, 'error');
-            }
-        });
+            }} catch (err) {{ showRepoMsg(err.message, 'error'); }}
+        }});
     </script>
 </body>
-</html>"""
+</html>""".format(favicon=FAVICON, logo=LOGO_SVG)
 
 
 async def ui(request: Request) -> HTMLResponse:
