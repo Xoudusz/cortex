@@ -470,6 +470,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 ph.style.display = 'none';
                 renderGraph(data);
                 info.textContent = data.nodes.length + ' nodes · ' + data.edges.length + ' edges · ' + repo;
+                info.innerHTML += ' &nbsp;<span style="font-size:0.7rem;color:var(--text-muted)"><span style="color:#4a6080">&#9646;</span> import &nbsp;<span style="color:#7c3210">&#9646;</span> call &nbsp;<span style="color:#1a5c3a">&#9646;</span> inherits</span>';
             } catch (err) {
                 info.textContent = 'Error: ' + err.message;
                 ph.textContent = err.message;
@@ -486,8 +487,8 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             const r = d => 4 + 10 * ((d.centrality || 0) / maxC);
             const g = svg.append('g');
             svg.call(d3.zoom().scaleExtent([0.1, 8]).on('zoom', e => g.attr('transform', e.transform)));
-            svg.append('defs').append('marker').attr('id','arr').attr('viewBox','0 -4 8 8').attr('refX',16).attr('refY',0).attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto').append('path').attr('d','M0,-4L8,0L0,4').attr('fill','#3d4466');
-            const link = g.append('g').selectAll('line').data(data.edges).join('line').attr('stroke','#2d3248').attr('stroke-width',1).attr('marker-end','url(#arr)').attr('opacity',0.5);
+            const defs=svg.append('defs');[['arr-import','#3d4466'],['arr-call','#7c3210'],['arr-inherits','#1a5c3a']].forEach(([id,color])=>{defs.append('marker').attr('id',id).attr('viewBox','0 -4 8 8').attr('refX',16).attr('refY',0).attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto').append('path').attr('d','M0,-4L8,0L0,4').attr('fill',color);});
+            const EDGE_COLOR={'import':'#2d3248','call':'#7c3210','inherits':'#1a5c3a'};const EDGE_MARKER={'import':'url(#arr-import)','call':'url(#arr-call)','inherits':'url(#arr-inherits)'};const link=g.append('g').selectAll('line').data(data.edges).join('line').attr('stroke',d=>EDGE_COLOR[d.type]||EDGE_COLOR.import).attr('stroke-width',d=>d.type==='inherits'?1.5:1).attr('marker-end',d=>EDGE_MARKER[d.type]||EDGE_MARKER.import).attr('opacity',0.6);
             const node = g.append('g').selectAll('g').data(data.nodes).join('g').attr('cursor','pointer')
                 .call(d3.drag()
                     .on('start',(e,d)=>{ if(!e.active) _sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
