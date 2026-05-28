@@ -66,11 +66,69 @@ jobs:
         if: steps.check.outputs.new == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VER: ${{ steps.ver.outputs.version }}
         run: |
-          VER="${{ steps.ver.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag "v$VER"
           git push origin "v$VER"
-          git log -1 --format='%B' > /tmp/release_notes.txt
+
+          python3 - << 'PYEOF'
+import subprocess, os, re
+
+ver = os.environ['VER']
+repo = 'Xoudusz/cortex'
+
+prev = subprocess.run(
+    ['git', 'describe', '--tags', '--abbrev=0', 'HEAD~1'],
+    capture_output=True, text=True,
+)
+prev_tag = prev.stdout.strip() if prev.returncode == 0 else ''
+
+log_range = f'{prev_tag}..HEAD' if prev_tag else 'HEAD'
+raw = subprocess.run(
+    ['git', 'log', log_range, '--format=%s', '--no-merges'],
+    capture_output=True, text=True,
+).stdout.strip()
+
+commits = [c for c in raw.split('\n') if c and not re.match(r'^chore: bump version', c, re.I)]
+
+PREFIX_MAP = {
+    'feat': 'Features', 'feature': 'Features',
+    'fix': 'Fixes', 'bugfix': 'Fixes',
+    'perf': 'Performance',
+    'refactor': 'Refactoring',
+    'ci': 'CI / Infra', 'build': 'CI / Infra', 'chore': 'CI / Infra',
+    'docs': 'Docs', 'doc': 'Docs',
+    'test': 'Tests', 'tests': 'Tests',
+}
+SECTION_ORDER = ['Features', 'Fixes', 'Performance', 'Refactoring', 'CI / Infra', 'Docs', 'Tests', 'Other']
+sections = {s: [] for s in SECTION_ORDER}
+
+for commit in commits:
+    m = re.match(r'^(\w+)(?:\([^)]+\))?!?:\s*(.+)$', commit)
+    if m:
+        section = PREFIX_MAP.get(m.group(1).lower(), 'Other')
+        msg = m.group(2).strip()
+    else:
+        section, msg = 'Other', commit.strip()
+    sections[section].append(msg)
+
+body = ''
+for section in SECTION_ORDER:
+    if sections[section]:
+        body += f'## {section}\n'
+        body += '\n'.join(f'- {item}' for item in sections[section])
+        body += '\n\n'
+
+if not body:
+    body = 'Automated release.\n\n'
+
+if prev_tag:
+    body += f'**Full Changelog**: https://github.com/{repo}/compare/{prev_tag}...v{ver}\n'
+
+with open('/tmp/release_notes.txt', 'w') as f:
+    f.write(body.strip())
+PYEOF
+
           gh release create "v$VER" --title "v$VER" --notes-file /tmp/release_notes.txt
