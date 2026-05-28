@@ -18,7 +18,7 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 | `/sse` | GET | MCP SSE endpoint (requires `x-api-key` header; internally rewritten to `/sse/sse` via ASGI middleware) |
 | `/health` | GET | Health check for autoheal |
 | `/webhook` | POST | GitHub push webhook — triggers per-repo code reindex |
-| `/api/graph/{repo}` | GET | Graph JSON for repo (`notes` for wikilink graph, or repo name for code graph) |
+| `/api/graph/{repo}` | GET | Graph JSON — `notes` = wikilink graph, `global` = cross-repo graph, or repo name |
 | `/api/stats` | GET | Efficiency metrics — centrality lift, PPR hit rate, cache stats |
 
 ## Deploy (Portainer)
@@ -98,10 +98,11 @@ Graph-augmented RAG builds a structural graph alongside vector embeddings, then 
 Built at index time from AST edges (no LLM needed):
 
 - **Import edges** — `import`/`from` (Python), `import`/`require` (JS/TS), `use` (Rust)
+- **Call edges** — JS/TS named imports matched against call sites → edge to source file
+- **Inheritance edges** — `class Foo(Bar)` (Python), `extends`/`implements` (TS/Kotlin)
+- Edge priority: `inherits > call > import`; tagged in graph JSON + D3 visualization (distinct arrow colors)
 - **Degree centrality** — files imported by many others score higher in search results (`final_score = vector_score * (1 + 0.2 * centrality)`)
 - **Louvain communities** — files clustered by connectivity; `community_id` groups related modules
-
-**Roadmap:** call edges (function call nodes via tree-sitter) and inheritance edges (`extends`/`implements`) — planned Phase 4.
 
 ### Notes graph (`/app/data/graph_notes.json`)
 
@@ -132,11 +133,18 @@ Tracks in-memory counters (resets on container restart):
 | `ppr_results_added` | Total extra results surfaced by PPR |
 | `graph_cache_hits` / `graph_cache_misses` | Graph JSON load efficiency |
 
-**Roadmap:** stats card in web UI dashboard — planned Phase 5.
+Stats card displayed in Admin tab of web UI dashboard.
+
+### Cross-repo graph (`/app/data/graph_global.json`)
+
+Built at full reindex time (no `--repo` flag). Scans root config files (`package.json`, `requirements.txt`, `go.mod`, `docker-compose.yml`, `.env*`) for mentions of other indexed repos and builds directed repo-level edges.
+
+Exposed as `GET /api/graph/global`. Dashboard: Graph tab → **★ Global (cross-repo)** → force-directed view with repo nodes and dashed cross-repo edges. Click node shows which files create each reference.
 
 ### Dashboard — Graph tab
 
-Web UI Graph tab: select repo → load force-directed D3.js graph. Nodes sized by centrality, colored by community. Click node to see imports detail.
+- **Per-repo view:** force-directed D3.js graph — nodes sized by centrality, colored by community, arrows colored by edge type (import/call/inherits)
+- **★ Global view:** repo nodes with dashed cross-repo edges; click shows source files
 
 ## Volume paths
 
