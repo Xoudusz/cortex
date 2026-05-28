@@ -192,6 +192,10 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <div class="stat-card"><div class="stat-label">Ollama</div><div class="stat-value" id="stat-ollama">-</div></div>
             </div>
             <div class="section">
+                <div class="section-title">Graph Efficiency</div>
+                <table class="webhook-table"><tbody id="graph-stats-body"><tr><td colspan="2" class="empty">Load admin tab to populate.</td></tr></tbody></table>
+            </div>
+            <div class="section">
                 <div class="section-title">Reindex</div>
                 <div class="reindex-buttons">
                     <button id="reindex-all">Reindex All</button>
@@ -319,6 +323,21 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 const ollama = document.getElementById('stat-ollama');
                 ollama.textContent = data.ollama?.status === 'ok' ? '✓' : '✗';
                 ollama.className = 'stat-value ' + (data.ollama?.status === 'ok' ? 'ok' : 'error');
+                if (data.graph) {
+                    const g = data.graph;
+                    const avgLift = g.centrality_lift_count > 0 ? (g.centrality_lift_total / g.centrality_lift_count).toFixed(4) : '—';
+                    const pprRate = g.search_notes_calls > 0 ? ((g.ppr_fires / g.search_notes_calls) * 100).toFixed(1) + '%' : '—';
+                    const total = g.graph_cache_hits + g.graph_cache_misses;
+                    const cacheRate = total > 0 ? ((g.graph_cache_hits / total) * 100).toFixed(1) + '%' : '—';
+                    document.getElementById('graph-stats-body').innerHTML = [
+                        ['search_code calls', g.search_code_calls],
+                        ['centrality lift avg', avgLift + ' (across ' + g.centrality_lift_count + ' results)'],
+                        ['search_notes calls', g.search_notes_calls],
+                        ['PPR fires', g.ppr_fires + ' (' + pprRate + ' of calls)'],
+                        ['PPR results added', g.ppr_results_added],
+                        ['graph cache hit rate', cacheRate + ' (' + g.graph_cache_hits + '/' + total + ')'],
+                    ].map(([k, v]) => '<tr><td style="color:var(--text-muted);width:55%">' + escapeHtml(String(k)) + '</td><td>' + escapeHtml(String(v)) + '</td></tr>').join('');
+                }
             } catch (err) { console.error('Failed to load stats:', err); }
         }
 
@@ -552,7 +571,7 @@ async def api_reindex(request: Request, reindex_lock, reindex_state: dict, run_r
     return JSONResponse({"status": "started"})
 
 
-async def api_stats(request: Request, qdrant_url: str, ollama_url: str) -> JSONResponse:
+async def api_stats(request: Request, qdrant_url: str, ollama_url: str, graph_stats: dict = None) -> JSONResponse:
     client = QdrantClient(url=qdrant_url)
     result = {}
     try:
@@ -568,4 +587,6 @@ async def api_stats(request: Request, qdrant_url: str, ollama_url: str) -> JSONR
         result["ollama"] = {"status": "ok" if resp.status_code == 200 else "error"}
     except Exception:
         result["ollama"] = {"status": "error"}
+    if graph_stats is not None:
+        result["graph"] = dict(graph_stats)
     return JSONResponse(result)
