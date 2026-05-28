@@ -82,10 +82,11 @@ jobs:
           RANGE="${RANGE:-HEAD}"
 
           feats="" fixes="" perfs="" refs="" ci="" docs="" tests="" other=""
+          _CC_RE='^([a-z]+)(\([^)]+\))?!?:\ (.+)$'
           while IFS= read -r line; do
             [[ -z "$line" ]] && continue
             [[ "$line" =~ ^[Cc]hore:\ bump\ version ]] && continue
-            if [[ "$line" =~ ^([a-z]+)(\([^)]+\))?!?:\ (.+)$ ]]; then
+            if [[ "$line" =~ $_CC_RE ]]; then
               prefix="${BASH_REMATCH[1]}"
               msg="${BASH_REMATCH[3]}"
             else
