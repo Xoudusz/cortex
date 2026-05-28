@@ -212,7 +212,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
 
         <div id="graph-panel" class="panel">
             <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;align-items:center">
-                <select id="graph-repo-select" style="flex:1"><option value="notes">Notes (wikilinks)</option></select>
+                <select id="graph-repo-select" style="flex:1"><option value="notes">Notes (wikilinks)</option><option value="global">★ Global (cross-repo)</option></select>
                 <button id="graph-load-btn" class="secondary" style="flex-shrink:0">Load Graph</button>
             </div>
             <div id="graph-info" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;min-height:1.2em"></div>
@@ -443,7 +443,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
 
         async function loadGraphRepos() {
             const sel = document.getElementById('graph-repo-select');
-            if (sel.options.length > 1) return;
+            if (sel.options.length > 2) return;
             try {
                 const meta = await api('/api/repos-meta');
                 (meta.repos || []).forEach(r => {
@@ -468,9 +468,14 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             try {
                 const data = await api('/api/graph/' + encodeURIComponent(repo));
                 ph.style.display = 'none';
-                renderGraph(data);
-                info.textContent = data.nodes.length + ' nodes · ' + data.edges.length + ' edges · ' + repo;
-                info.innerHTML += ' &nbsp;<span style="font-size:0.7rem;color:var(--text-muted)"><span style="color:#4a6080">&#9646;</span> import &nbsp;<span style="color:#7c3210">&#9646;</span> call &nbsp;<span style="color:#1a5c3a">&#9646;</span> inherits</span>';
+                if (repo === 'global') {
+                    renderGlobalGraph(data);
+                    info.textContent = data.nodes.length + ' repos \xb7 ' + data.edges.length + ' cross-repo edges';
+                } else {
+                    renderGraph(data);
+                    info.textContent = data.nodes.length + ' nodes \xb7 ' + data.edges.length + ' edges \xb7 ' + repo;
+                    info.innerHTML += ' \xa0<span style=\"font-size:0.7rem;color:var(--text-muted)\"><span style=\"color:#4a6080\">&#9646;</span> import \xa0<span style=\"color:#7c3210\">&#9646;</span> call \xa0<span style=\"color:#1a5c3a\">&#9646;</span> inherits</span>';
+                }
             } catch (err) {
                 info.textContent = 'Error: ' + err.message;
                 ph.textContent = err.message;
@@ -507,13 +512,64 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     e.stopPropagation();
                 });
             node.append('circle').attr('r',r).attr('fill',d=>GRAPH_COLORS[(d.community_id||0)%GRAPH_COLORS.length]).attr('stroke','var(--bg)').attr('stroke-width',1.5).attr('opacity',0.88);
-            node.append('text').text(d=>{ const id=d.id||d.file||''; return id.split('/').pop().replace(/\\.(ts|tsx|js|jsx|py|kt|kts|svelte)$/,''); }).attr('font-size','8px').attr('fill','#8896a8').attr('text-anchor','middle').attr('dy',d=>r(d)+9).style('pointer-events','none').style('user-select','none');
+            node.append('text').text(d=>{ const id=d.id||d.file||''; return id.split('/').pop().replace(/\.(ts|tsx|js|jsx|py|kt|kts|svelte)$/,''); }).attr('font-size','8px').attr('fill','#8896a8').attr('text-anchor','middle').attr('dy',d=>r(d)+9).style('pointer-events','none').style('user-select','none');
             container.addEventListener('click',()=>{ document.getElementById('graph-detail').innerHTML=''; });
             _sim = d3.forceSimulation(data.nodes)
                 .force('link',d3.forceLink(data.edges).id(d=>d.id||d.file).distance(70).strength(0.4))
                 .force('charge',d3.forceManyBody().strength(-100))
                 .force('center',d3.forceCenter(W/2,H/2))
                 .force('collide',d3.forceCollide().radius(d=>r(d)+5))
+                .on('tick',()=>{
+                    link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+                    node.attr('transform',d=>'translate('+d.x+','+d.y+')');
+                });
+        }
+
+        function renderGlobalGraph(data) {
+            const container = document.getElementById('graph-container');
+            const W = container.clientWidth || 840;
+            const H = container.clientHeight || 520;
+            const svg = d3.select('#graph-svg');
+            svg.selectAll('*').remove();
+            const g = svg.append('g');
+            svg.call(d3.zoom().scaleExtent([0.1,8]).on('zoom', e => g.attr('transform', e.transform)));
+            const defs = svg.append('defs');
+            defs.append('marker').attr('id','arr-cross').attr('viewBox','0 -4 8 8').attr('refX',32).attr('refY',0)
+                .attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto')
+                .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','#4a5568');
+            const link = g.append('g').selectAll('line').data(data.edges).join('line')
+                .attr('stroke','#4a5568').attr('stroke-width',1.5).attr('stroke-dasharray','5,3')
+                .attr('marker-end','url(#arr-cross)').attr('opacity',0.7);
+            const REPO_COLORS = ['#a78bfa','#34d399','#f87171','#fbbf24','#60a5fa','#f472b6','#4ade80','#fb923c'];
+            const colorMap = {};
+            data.nodes.forEach((n,i) => { colorMap[n.id] = REPO_COLORS[i % REPO_COLORS.length]; });
+            const node = g.append('g').selectAll('g').data(data.nodes).join('g')
+                .attr('cursor','pointer')
+                .call(d3.drag()
+                    .on('start',(e,d)=>{ if(!e.active) _sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+                    .on('drag',(e,d)=>{ d.fx=e.x; d.fy=e.y; })
+                    .on('end',(e,d)=>{ if(!e.active) _sim.alphaTarget(0); d.fx=null; d.fy=null; }))
+                .on('click',(e,d)=>{
+                    const incoming = data.edges.filter(ed => (ed.target?.id||ed.target) === d.id);
+                    const outgoing = data.edges.filter(ed => (ed.source?.id||ed.source) === d.id);
+                    let html = '<div class=\"result-card\"><div class=\"result-title\">' + escapeHtml(d.id) + '</div>';
+                    html += '<div style=\"margin-top:0.5rem;font-size:0.75rem;color:var(--text-muted)\">';
+                    if (outgoing.length) { html += '<b>references:</b><br>' + outgoing.map(ed => { const t=ed.target?.id||ed.target; return '  → '+escapeHtml(t)+(ed.files?.length?' via '+escapeHtml(ed.files.slice(0,3).join(', ')):'')+NL; }).join('<br>'); }
+                    if (incoming.length) { html += '<b>referenced by:</b><br>' + incoming.map(ed => { const s=ed.source?.id||ed.source; return '  ← '+escapeHtml(s)+(ed.files?.length?' via '+escapeHtml(ed.files.slice(0,3).join(', ')):'')+NL; }).join('<br>'); }
+                    if (!outgoing.length && !incoming.length) html += '(no cross-repo connections)';
+                    html += '</div></div>';
+                    document.getElementById('graph-detail').innerHTML = html;
+                    e.stopPropagation();
+                });
+            node.append('circle').attr('r',20).attr('fill',d=>colorMap[d.id]).attr('stroke','var(--bg)').attr('stroke-width',2).attr('opacity',0.9);
+            node.append('text').text(d=>d.id).attr('font-size','9px').attr('fill','#e2e8f0')
+                .attr('text-anchor','middle').attr('dy',32).style('pointer-events','none').style('user-select','none');
+            container.addEventListener('click',()=>{ document.getElementById('graph-detail').innerHTML=''; });
+            _sim = d3.forceSimulation(data.nodes)
+                .force('link',d3.forceLink(data.edges).id(d=>d.id).distance(180).strength(0.3))
+                .force('charge',d3.forceManyBody().strength(-400))
+                .force('center',d3.forceCenter(W/2,H/2))
+                .force('collide',d3.forceCollide().radius(30))
                 .on('tick',()=>{
                     link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
                     node.attr('transform',d=>'translate('+d.x+','+d.y+')');

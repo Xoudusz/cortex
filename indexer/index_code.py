@@ -272,6 +272,19 @@ def main():
 
     print("\nDone.")
 
+    # Build global cross-repo graph (only when indexing all repos)
+    if not args.repo:
+        try:
+            import graph as _graph
+            repo_paths_map = {
+                r.split("/")[1]: REPOS_DIR / r.split("/")[1]
+                for r in repos
+                if (REPOS_DIR / r.split("/")[1]).exists()
+            }
+            _graph.build_global_graph(repo_paths_map)
+        except Exception as e:
+            print(f"  global graph build failed: {e}")
+
 
 if __name__ == "__main__":
     main()
