@@ -512,7 +512,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     e.stopPropagation();
                 });
             node.append('circle').attr('r',r).attr('fill',d=>GRAPH_COLORS[(d.community_id||0)%GRAPH_COLORS.length]).attr('stroke','var(--bg)').attr('stroke-width',1.5).attr('opacity',0.88);
-            node.append('text').text(d=>{ const id=d.id||d.file||''; return id.split('/').pop().replace(/\.(ts|tsx|js|jsx|py|kt|kts|svelte)$/,''); }).attr('font-size','8px').attr('fill','#8896a8').attr('text-anchor','middle').attr('dy',d=>r(d)+9).style('pointer-events','none').style('user-select','none');
+            node.append('text').text(d=>{ const id=d.id||d.file||''; return id.split('/').pop().replace(/\\.(ts|tsx|js|jsx|py|kt|kts|svelte)$/,''); }).attr('font-size','8px').attr('fill','#8896a8').attr('text-anchor','middle').attr('dy',d=>r(d)+9).style('pointer-events','none').style('user-select','none');
             container.addEventListener('click',()=>{ document.getElementById('graph-detail').innerHTML=''; });
             _sim = d3.forceSimulation(data.nodes)
                 .force('link',d3.forceLink(data.edges).id(d=>d.id||d.file).distance(70).strength(0.4))
