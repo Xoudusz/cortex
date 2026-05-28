@@ -77,62 +77,44 @@ jobs:
           git tag "v$VER"
           git push origin "v$VER"
 
-          python3 - << 'PYEOF'
-import subprocess, os, re
+          PREV=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || true)
+          RANGE="${PREV:+$PREV..HEAD}"
+          RANGE="${RANGE:-HEAD}"
 
-ver = os.environ['VER']
-repo = 'Xoudusz/cortex'
+          feats="" fixes="" perfs="" refs="" ci="" docs="" tests="" other=""
+          while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            [[ "$line" =~ ^[Cc]hore:\ bump\ version ]] && continue
+            if [[ "$line" =~ ^([a-z]+)(\([^)]+\))?!?:\ (.+)$ ]]; then
+              prefix="${BASH_REMATCH[1]}"
+              msg="${BASH_REMATCH[3]}"
+            else
+              prefix=""
+              msg="$line"
+            fi
+            case "$prefix" in
+              feat|feature) feats="${feats}- $msg\n" ;;
+              fix|bugfix)   fixes="${fixes}- $msg\n" ;;
+              perf)         perfs="${perfs}- $msg\n" ;;
+              refactor)     refs="${refs}- $msg\n" ;;
+              ci|build|chore) ci="${ci}- $msg\n" ;;
+              docs|doc)     docs="${docs}- $msg\n" ;;
+              test|tests)   tests="${tests}- $msg\n" ;;
+              *)            other="${other}- $line\n" ;;
+            esac
+          done < <(git log "$RANGE" --format='%s' --no-merges 2>/dev/null)
 
-prev = subprocess.run(
-    ['git', 'describe', '--tags', '--abbrev=0', 'HEAD~1'],
-    capture_output=True, text=True,
-)
-prev_tag = prev.stdout.strip() if prev.returncode == 0 else ''
+          body=""
+          [ -n "$feats" ] && body="${body}## Features\n${feats}\n"
+          [ -n "$fixes" ] && body="${body}## Fixes\n${fixes}\n"
+          [ -n "$perfs" ] && body="${body}## Performance\n${perfs}\n"
+          [ -n "$refs"  ] && body="${body}## Refactoring\n${refs}\n"
+          [ -n "$ci"    ] && body="${body}## CI / Infra\n${ci}\n"
+          [ -n "$docs"  ] && body="${body}## Docs\n${docs}\n"
+          [ -n "$tests" ] && body="${body}## Tests\n${tests}\n"
+          [ -n "$other" ] && body="${body}## Other\n${other}\n"
+          [ -z "$body"  ] && body="Automated release.\n"
+          [ -n "$PREV"  ] && body="${body}**Full Changelog**: https://github.com/Xoudusz/cortex/compare/${PREV}...v${VER}\n"
 
-log_range = f'{prev_tag}..HEAD' if prev_tag else 'HEAD'
-raw = subprocess.run(
-    ['git', 'log', log_range, '--format=%s', '--no-merges'],
-    capture_output=True, text=True,
-).stdout.strip()
-
-commits = [c for c in raw.split('\n') if c and not re.match(r'^chore: bump version', c, re.I)]
-
-PREFIX_MAP = {
-    'feat': 'Features', 'feature': 'Features',
-    'fix': 'Fixes', 'bugfix': 'Fixes',
-    'perf': 'Performance',
-    'refactor': 'Refactoring',
-    'ci': 'CI / Infra', 'build': 'CI / Infra', 'chore': 'CI / Infra',
-    'docs': 'Docs', 'doc': 'Docs',
-    'test': 'Tests', 'tests': 'Tests',
-}
-SECTION_ORDER = ['Features', 'Fixes', 'Performance', 'Refactoring', 'CI / Infra', 'Docs', 'Tests', 'Other']
-sections = {s: [] for s in SECTION_ORDER}
-
-for commit in commits:
-    m = re.match(r'^(\w+)(?:\([^)]+\))?!?:\s*(.+)$', commit)
-    if m:
-        section = PREFIX_MAP.get(m.group(1).lower(), 'Other')
-        msg = m.group(2).strip()
-    else:
-        section, msg = 'Other', commit.strip()
-    sections[section].append(msg)
-
-body = ''
-for section in SECTION_ORDER:
-    if sections[section]:
-        body += f'## {section}\n'
-        body += '\n'.join(f'- {item}' for item in sections[section])
-        body += '\n\n'
-
-if not body:
-    body = 'Automated release.\n\n'
-
-if prev_tag:
-    body += f'**Full Changelog**: https://github.com/{repo}/compare/{prev_tag}...v{ver}\n'
-
-with open('/tmp/release_notes.txt', 'w') as f:
-    f.write(body.strip())
-PYEOF
-
+          printf "%b" "$body" > /tmp/release_notes.txt
           gh release create "v$VER" --title "v$VER" --notes-file /tmp/release_notes.txt
