@@ -19,6 +19,7 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 | `/health` | GET | Health check for autoheal |
 | `/webhook` | POST | GitHub push webhook — triggers per-repo code reindex |
 | `/api/graph/{repo}` | GET | Graph JSON for repo (`notes` for wikilink graph, or repo name for code graph) |
+| `/api/stats` | GET | Efficiency metrics — centrality lift, PPR hit rate, cache stats |
 
 ## Deploy (Portainer)
 
@@ -94,11 +95,13 @@ Graph-augmented RAG builds a structural graph alongside vector embeddings, then 
 
 ### Code graph (`/app/data/graph_{repo}.json`)
 
-Built at index time from AST import edges (no LLM needed):
+Built at index time from AST edges (no LLM needed):
 
 - **Import edges** — `import`/`from` (Python), `import`/`require` (JS/TS), `use` (Rust)
 - **Degree centrality** — files imported by many others score higher in search results (`final_score = vector_score * (1 + 0.2 * centrality)`)
 - **Louvain communities** — files clustered by connectivity; `community_id` groups related modules
+
+**Roadmap:** call edges (function call nodes via tree-sitter) and inheritance edges (`extends`/`implements`) — planned Phase 4.
 
 ### Notes graph (`/app/data/graph_notes.json`)
 
@@ -114,6 +117,22 @@ Built from `[[wikilink]]` patterns in Markdown files:
 | `search_notes` | Vector search + PPR augmentation; PPR-surfaced notes tagged `[via wikilinks]` |
 | `get_neighbors(file, repo)` | Returns direct imports and imported-by list for a file |
 | `get_community(repo, community_id)` | Lists all files in a Louvain cluster; high-centrality files starred |
+
+### Efficiency metrics (`/api/stats`)
+
+Tracks in-memory counters (resets on container restart):
+
+| Metric | Description |
+|--------|-------------|
+| `search_code_calls` | Total `search_code` invocations |
+| `centrality_lift_total` | Sum of score boost from centrality across all results |
+| `centrality_lift_count` | Results where centrality > 0 (graph coverage) |
+| `search_notes_calls` | Total `search_notes` invocations |
+| `ppr_fires` | Times PPR returned ≥1 extra result |
+| `ppr_results_added` | Total extra results surfaced by PPR |
+| `graph_cache_hits` / `graph_cache_misses` | Graph JSON load efficiency |
+
+**Roadmap:** stats card in web UI dashboard — planned Phase 5.
 
 ### Dashboard — Graph tab
 
