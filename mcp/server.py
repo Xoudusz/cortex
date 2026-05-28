@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import hashlib
 import hmac
@@ -41,6 +42,7 @@ WEBHOOK_SECRET  = os.environ.get("WEBHOOK_SECRET", "")
 API_KEY         = os.environ.get("API_KEY", "")
 GITHUB_TOKEN    = os.environ.get("GITHUB_TOKEN", "")
 REPOS_CONFIG    = os.environ.get("REPOS_CONFIG", "/app/data/repos.json")
+DATA_DIR        = Path(REPOS_CONFIG).parent
 
 DEFAULT_REPOS = [
     "Xoudusz/weakness-dex",
@@ -52,12 +54,11 @@ DEFAULT_REPOS = [
     "Xoudusz/riftracoons-web",
 ]
 
-# Webhook log — last 50 events, in-memory only
-_webhook_log: list[dict] = []
+_webhook_log: list = []
+_graph_cache: dict = {}
 
 
 def _load_repos_meta() -> dict:
-    """Load full repos metadata: {repos: [...], indexed_at: {name: iso_ts}}."""
     try:
         if os.path.exists(REPOS_CONFIG):
             with open(REPOS_CONFIG) as f:
@@ -71,7 +72,7 @@ def _load_repos_meta() -> dict:
     return {"repos": list(DEFAULT_REPOS), "indexed_at": {}}
 
 
-def _load_repos() -> list[str]:
+def _load_repos() -> list:
     return _load_repos_meta()["repos"]
 
 
@@ -81,7 +82,7 @@ def _save_repos_meta(meta: dict) -> None:
         json.dump(meta, f, indent=2)
 
 
-def _save_repos(repos: list[str]) -> None:
+def _save_repos(repos: list) -> None:
     meta = _load_repos_meta()
     meta["repos"] = repos
     _save_repos_meta(meta)
@@ -91,6 +92,29 @@ def _update_indexed_at(repo_name: str) -> None:
     meta = _load_repos_meta()
     meta.setdefault("indexed_at", {})[repo_name] = datetime.now(timezone.utc).isoformat()
     _save_repos_meta(meta)
+
+
+def _get_code_graph_meta(repo_name: str) -> dict:
+    """Load and cache code graph node metadata. Returns {file_rel: node_dict}."""
+    if repo_name in _graph_cache:
+        return _graph_cache[repo_name]
+    path = DATA_DIR / f"graph_{repo_name}.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+        meta = {n["id"]: n for n in data.get("nodes", []) if "id" in n}
+        _graph_cache[repo_name] = meta
+        return meta
+    except Exception:
+        return {}
+
+
+def _invalidate_graph_cache(repo_name: str = "") -> None:
+    if repo_name:
+        _graph_cache.pop(repo_name, None)
+    else:
+        _graph_cache.clear()
 
 
 mcp = FastMCP("cortex", host=HOST, port=PORT)
@@ -108,6 +132,8 @@ Use PROACTIVELY — search before asking user for context.
 
 - `search_notes(query)` — Obsidian vault (projects, plans, server config, decisions)
 - `search_code(query)` — repos: weakness-dex, mtgdle, tower-of-evolon, tower-of-evolon-backend, svelte-radio, cortex, riftracoons
+- `get_neighbors(file, repo)` — show what a file imports and what imports it
+- `get_community(repo, community_id)` — list all files in the same structural cluster
 - `reindex(notes, code, repo)` — refresh vectors if stale
 - `reindex_status()` — check progress
 
@@ -128,7 +154,7 @@ Use PROACTIVELY — search before asking user for context.
 '''
 
 
-def embed(text: str) -> list[float]:
+def embed(text: str) -> list:
     resp = httpx.post(
         f"{OLLAMA_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text[:4000]},
@@ -161,6 +187,7 @@ def search_notes(query: str, limit: int = 5) -> str:
     - Anything that sounds like it could be in personal notes
 
     Returns matching note sections with file path, heading, score, and tags.
+    PPR over wikilinks surfaces related notes beyond direct vector matches.
     Prefer this over asking the user to explain context they may have already written down.
     """
     client = QdrantClient(url=QDRANT_URL)
@@ -169,13 +196,27 @@ def search_notes(query: str, limit: int = 5) -> str:
     if not results:
         return "No results found."
     parts = []
+    matched_files = []
+    matched_scores = []
     for r in results:
         p = r.payload
         tags = p.get("tags", [])
         tag_str = f" `{'`, `'.join(tags)}`" if tags else ""
         parts.append(
-            f"**{p['file']} › {p['heading']}** (score: {round(r.score, 3)}){tag_str}\n\n{p['text']}"
+            f"**{p['file']} > {p['heading']}** (score: {round(r.score, 3)}){tag_str}\n\n{p['text']}"
         )
+        matched_files.append(p.get("file", ""))
+        matched_scores.append(r.score)
+    try:
+        from graph import ppr_augment
+        extras = ppr_augment(matched_files, matched_scores, DATA_DIR / "graph_notes.json")
+        if extras:
+            ppr_lines = ["**Related via wikilinks (PPR):**"]
+            for e in extras:
+                ppr_lines.append(f"  -> {e['file']} (ppr: {e['ppr_score']})")
+            parts.append("\n".join(ppr_lines))
+    except Exception:
+        pass
     return "\n\n---\n\n".join(parts)
 
 
@@ -192,22 +233,38 @@ def search_code(query: str, limit: int = 5) -> str:
     - The user asks "how does X work" about one of their projects
     - Writing code that should match existing conventions in the repo
 
-    Returns code chunks with file path, line numbers, language, score, and GitHub link.
+    Results are re-ranked by centrality (highly-imported files score higher).
+    Returns code chunks with file path, line numbers, language, score, centrality, community, and GitHub link.
     Always search before writing code for these repos — don't guess at existing patterns.
     """
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
-    results = client.query_points("code", query=vector, limit=limit, with_payload=True).points
+    fetch_limit = min(limit * 3, 50)
+    results = client.query_points("code", query=vector, limit=fetch_limit, with_payload=True).points
     if not results:
         return "No results found."
-    parts = []
+    scored = []
     for r in results:
         p = r.payload
+        file_meta = _get_code_graph_meta(p.get("repo", "")).get(p.get("file", ""), {})
+        centrality = file_meta.get("centrality", 0.0)
+        boosted = r.score * (1.0 + 0.2 * centrality)
+        scored.append((boosted, r, file_meta))
+    scored.sort(key=lambda x: -x[0])
+    parts = []
+    for boosted_score, r, file_meta in scored[:limit]:
+        p = r.payload
+        centrality = file_meta.get("centrality")
+        community = file_meta.get("community_id")
         header = (
             f"**{p['repo']}/{p['file']}** "
             f"lines {p['start_line']}-{p['end_line']} "
-            f"({p.get('language', '')}) — score: {round(r.score, 3)}"
+            f"({p.get('language', '')}) — score: {round(boosted_score, 3)}"
         )
+        if centrality is not None:
+            header += f" · centrality: {centrality}"
+        if community is not None:
+            header += f" · community: {community}"
         url = p.get("github_url", "")
         parts.append(f"{header}\n{url}\n\n{p['text']}" if url else f"{header}\n\n{p['text']}")
     return "\n\n---\n\n".join(parts)
@@ -217,7 +274,7 @@ _reindex_lock = threading.Lock()
 _reindex_state: dict = {"running": False, "started_at": None, "output": [], "error": None, "done": False}
 
 
-def _stream(cmd: list[str], label: str, timeout: int) -> None:
+def _stream(cmd: list, label: str, timeout: int) -> None:
     _reindex_state["output"].append(f"=== {label}: starting ===")
     log.info("[%s] starting", label)
     proc = subprocess.Popen(
@@ -254,7 +311,7 @@ def _run_reindex(notes: bool, code: bool, repo: str = "") -> None:
             if repo:
                 cmd += ["--repo", repo]
             _stream(cmd, "code", 600)
-            # Record indexed_at timestamps
+            _invalidate_graph_cache(repo)
             if repo:
                 _update_indexed_at(repo)
             else:
@@ -303,6 +360,70 @@ def reindex_status() -> str:
     if s["error"]:
         lines.append(f"Error: {s['error']}")
     return "\n\n".join(lines)
+
+
+@mcp.tool()
+def get_neighbors(file: str, repo: str) -> str:
+    """Show what a code file imports and what imports it (direct graph neighbors).
+
+    Use when you want to explore structural connections around a file you found.
+    Example: get_neighbors("mcp/server.py", "cortex")
+
+    Requires graph data — run reindex first if empty.
+    """
+    meta = _get_code_graph_meta(repo)
+    if not meta:
+        return f"No graph data for '{repo}'. Run reindex(code=True, repo='{repo}') first."
+    file_meta = meta.get(file)
+    if file_meta is None:
+        matches = [f for f in meta if file in f]
+        if not matches:
+            return f"File '{file}' not found in graph for '{repo}'."
+        file = matches[0]
+        file_meta = meta[file]
+    imports = file_meta.get("imports", [])
+    imported_by = file_meta.get("imported_by", [])
+    lines = [
+        f"**{file}**",
+        f"centrality: {file_meta.get('centrality', 0)} · community: {file_meta.get('community_id', '?')}",
+    ]
+    if imports:
+        lines.append(f"\nimports ({len(imports)}):")
+        lines.extend(f"  -> {f}" for f in imports)
+    if imported_by:
+        lines.append(f"\nimported by ({len(imported_by)}):")
+        lines.extend(f"  <- {f}" for f in imported_by)
+    if not imports and not imported_by:
+        lines.append("\nNo connections found (isolated file).")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_community(repo: str, community_id: int) -> str:
+    """List all files in the same structural community/cluster for a repo.
+
+    Use when you want to find everything structurally related to a file.
+    Tip: run search_code first to find a community_id, then call this.
+    Example: get_community("cortex", 0)
+
+    Requires graph data — run reindex first if empty.
+    """
+    meta = _get_code_graph_meta(repo)
+    if not meta:
+        return f"No graph data for '{repo}'. Run reindex(code=True, repo='{repo}') first."
+    members = [
+        (f, m.get("centrality", 0))
+        for f, m in meta.items()
+        if m.get("community_id") == community_id
+    ]
+    if not members:
+        return f"Community {community_id} not found in '{repo}'."
+    members.sort(key=lambda x: -x[1])
+    lines = [f"**Community {community_id}** in '{repo}' — {len(members)} files:"]
+    for f, centrality in members:
+        star = "*" if centrality > 0.1 else " "
+        lines.append(f"  {star} {f} (centrality: {centrality})")
+    return "\n".join(lines)
 
 
 def _merge_onboarding(existing: str) -> str:
@@ -374,7 +495,7 @@ Call `search_notes("test query")`. Report status of each step when done."""
 
 class _NotesHandler(FileSystemEventHandler):
     def __init__(self):
-        self._timer: threading.Timer | None = None
+        self._timer = None
 
     def on_any_event(self, event):
         if event.is_directory or not str(event.src_path).endswith(".md"):
@@ -451,7 +572,7 @@ async def webhook(request: Request) -> JSONResponse:
         _webhook_log.insert(0, {"repo": repo or "unknown", "ts": ts, "status": "triggered"})
         _webhook_log[:] = _webhook_log[:50]
         threading.Thread(target=_run_reindex, args=(False, True, repo), daemon=True).start()
-    log.info("[webhook] push on %s → code reindex triggered", repo or "unknown")
+    log.info("[webhook] push on %s -> code reindex triggered", repo or "unknown")
     return JSONResponse({"status": "ok", "repo": repo})
 
 
@@ -465,7 +586,6 @@ def _start_watcher():
     log.info("[watcher] watching %s for .md changes (debounce %ds)", NOTES_PATH, WATCH_DEBOUNCE)
 
 
-# Web UI route handlers
 async def _ui_handler(request: Request):
     return await ui(request)
 
@@ -482,7 +602,19 @@ async def _api_stats_handler(request: Request):
     return await api_stats(request, QDRANT_URL, OLLAMA_URL)
 
 
-# Repos management
+async def _api_graph_handler(request: Request) -> JSONResponse:
+    repo = request.path_params.get("repo", "")
+    if not repo:
+        return JSONResponse({"error": "repo required"}, status_code=400)
+    graph_path = DATA_DIR / ("graph_notes.json" if repo == "notes" else f"graph_{repo}.json")
+    if not graph_path.exists():
+        return JSONResponse({"error": f"No graph for '{repo}'. Run reindex first."}, status_code=404)
+    try:
+        return JSONResponse(json.loads(graph_path.read_text()))
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 async def _api_repos_handler(request: Request) -> JSONResponse:
     if request.method == "GET":
         return JSONResponse({"repos": _load_repos()})
@@ -555,6 +687,7 @@ if __name__ == "__main__":
         Route("/api/repos-meta", _api_repos_meta_handler, methods=["GET"]),
         Route("/api/github/repos", _api_github_repos, methods=["GET"]),
         Route("/api/webhook-log", _api_webhook_log_handler, methods=["GET"]),
+        Route("/api/graph/{repo:path}", _api_graph_handler, methods=["GET"]),
         Route("/.well-known/oauth-authorization-server", oauth_not_found),
         Route("/.well-known/openid-configuration", oauth_not_found),
         Route("/register", oauth_not_found, methods=["POST"]),
