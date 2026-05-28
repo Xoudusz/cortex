@@ -5,7 +5,7 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 ## Services
 
 | Service | Port | Description |
-|---------|------|-------------| 
+|---------|------|-------------|
 | Ollama | 11434 | Embeddings via `nomic-embed-text` |
 | Qdrant | 6333 | Vector store — collections: `notes`, `code` |
 | cortex-mcp | 8765 | MCP SSE server for Claude Code |
@@ -18,6 +18,7 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 | `/sse` | GET | MCP SSE endpoint (requires `x-api-key` header; internally rewritten to `/sse/sse` via ASGI middleware) |
 | `/health` | GET | Health check for autoheal |
 | `/webhook` | POST | GitHub push webhook — triggers per-repo code reindex |
+| `/api/graph/{repo}` | GET | Graph JSON for repo (`notes` for wikilink graph, or repo name for code graph) |
 
 ## Deploy (Portainer)
 
@@ -83,12 +84,44 @@ docker compose --profile index run --rm cortex-indexer
 | Collection | Chunk strategy | Key payload fields |
 |------------|---------------|-------------------|
 | `notes` | H1-H3 heading boundaries | `file`, `heading`, `tags`, `modified_at`, `text` |
-| `code` | Tree-sitter semantic (functions/classes) with sliding-window fallback | `repo`, `file`, `language`, `start_line`, `end_line`, `github_url`, `text` |
+| `code` | Tree-sitter semantic (functions/classes) with sliding-window fallback | `repo`, `file`, `language`, `start_line`, `end_line`, `github_url`, `text`, `centrality`, `community_id`, `imports`, `imported_by` |
 
 Tree-sitter languages: Python, JavaScript, TypeScript, Kotlin. Others fallback to 30-line sliding window.
+
+## Graph Layer
+
+Graph-augmented RAG builds a structural graph alongside vector embeddings, then uses it to boost retrieval quality.
+
+### Code graph (`/app/data/graph_{repo}.json`)
+
+Built at index time from AST import edges (no LLM needed):
+
+- **Import edges** — `import`/`from` (Python), `import`/`require` (JS/TS), `use` (Rust)
+- **Degree centrality** — files imported by many others score higher in search results (`final_score = vector_score * (1 + 0.2 * centrality)`)
+- **Louvain communities** — files clustered by connectivity; `community_id` groups related modules
+
+### Notes graph (`/app/data/graph_notes.json`)
+
+Built from `[[wikilink]]` patterns in Markdown files:
+
+- **Personalized PageRank (PPR)** — query-time walk seeded from vector-matched notes; surfaces related notes that are structurally connected but semantically distant from the query string
+
+### MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `search_code` | Vector search + centrality re-ranking; results include `centrality` and `community_id` |
+| `search_notes` | Vector search + PPR augmentation; PPR-surfaced notes tagged `[via wikilinks]` |
+| `get_neighbors(file, repo)` | Returns direct imports and imported-by list for a file |
+| `get_community(repo, community_id)` | Lists all files in a Louvain cluster; high-centrality files starred |
+
+### Dashboard — Graph tab
+
+Web UI Graph tab: select repo → load force-directed D3.js graph. Nodes sized by centrality, colored by community. Click node to see imports detail.
 
 ## Volume paths
 
 - Ollama models: `/mnt/data/ai/ollama` (RAID)
 - Qdrant storage: `/home/docker/volumes/qdrant/storage`
 - Notes (read-only mount from Syncthing): `/home/docker/volumes/syncthing/notes`
+- Graph data: `/app/data/` (inside container, via cortex-mcp volume)
