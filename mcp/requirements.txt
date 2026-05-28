@@ -4,3 +4,4 @@ qdrant-client
 watchdog
 uvicorn
 starlette
+networkx

@@ -3,6 +3,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY index.py index_code.py index.sh .
+COPY index.py index_code.py index.sh graph.py .
 RUN chmod +x index.sh
 CMD ["bash", "index.sh"]
