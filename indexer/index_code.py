@@ -46,8 +46,7 @@ DEFAULT_REPOS = [
 ]
 
 
-def _load_repos() -> list[str]:
-    """Load repos from config file (flat array or {repos, indexed_at} dict), fall back to DEFAULT_REPOS."""
+def _load_repos() -> list:
     try:
         if os.path.exists(REPOS_CONFIG):
             with open(REPOS_CONFIG) as f:
@@ -63,7 +62,6 @@ def _load_repos() -> list[str]:
     return list(DEFAULT_REPOS)
 
 
-# --- tree-sitter setup (graceful fallback to sliding window if unavailable) ---
 try:
     from tree_sitter import Language, Parser as _TSParser
     import tree_sitter_python as _tspy
@@ -96,7 +94,7 @@ except Exception:
     _TS_SEMANTIC = {}
 
 
-def embed(text: str) -> list[float]:
+def embed(text: str) -> list:
     resp = httpx.post(
         f"{OLLAMA_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text[:4000]},
@@ -119,7 +117,7 @@ def clone_or_pull(repo: str) -> Path:
     return dest
 
 
-def _sliding_window(lines: list[str], start: int, end: int, repo_name: str, rel: str, language: str) -> list[dict]:
+def _sliding_window(lines: list, start: int, end: int, repo_name: str, rel: str, language: str) -> list:
     step = CHUNK_LINES - OVERLAP_LINES
     chunks = []
     i = start
@@ -150,7 +148,7 @@ def _collect_semantic_nodes(node, target_types: set, depth: int = 0, max_depth: 
     return result
 
 
-def chunk_file(path: Path, repo_name: str) -> list[dict]:
+def chunk_file(path: Path, repo_name: str) -> list:
     try:
         source = path.read_bytes()
         lines  = source.decode("utf-8", errors="replace").splitlines()
@@ -233,6 +231,8 @@ def main():
         ]
 
         total = 0
+        file_point_ids: dict = {}
+
         for path in code_files:
             points = []
             for chunk in chunk_file(path, name):
@@ -240,11 +240,35 @@ def main():
                     f"{chunk['repo']}:{chunk['file']}:{chunk['start_line']}".encode()
                 ).hexdigest()[:8], 16)
                 points.append(PointStruct(id=cid, vector=embed(chunk["text"]), payload=chunk))
+                file_point_ids.setdefault(chunk["file"], []).append(cid)
             if points:
                 client.upsert(COLLECTION, points)
                 total += len(points)
 
         print(f"  {name}: {total} chunks from {len(code_files)} files")
+
+        # Build graph and back-fill centrality/community into Qdrant payloads
+        try:
+            import graph as _graph
+            G = _graph.build_code_graph(repo_path, set(file_point_ids.keys()))
+            if G is not None:
+                metadata = _graph.compute_code_metadata(G)
+                _graph.persist_code_graph(G, metadata, name)
+                for file_rel, meta in metadata.items():
+                    point_ids = file_point_ids.get(file_rel, [])
+                    if point_ids:
+                        client.set_payload(
+                            collection_name=COLLECTION,
+                            payload={
+                                "centrality": meta["centrality"],
+                                "community_id": meta["community_id"],
+                                "imports": meta["imports"],
+                                "imported_by": meta["imported_by"],
+                            },
+                            points=point_ids,
+                        )
+        except Exception as e:
+            print(f"  graph build failed for {name}: {e}")
 
     print("\nDone.")
 

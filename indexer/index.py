@@ -18,7 +18,7 @@ EMBED_MODEL = "nomic-embed-text"
 VECTOR_SIZE = 768
 
 
-def embed(text: str) -> list[float]:
+def embed(text: str) -> list:
     resp = httpx.post(
         f"{OLLAMA_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text},
@@ -28,7 +28,7 @@ def embed(text: str) -> list[float]:
     return resp.json()["embedding"]
 
 
-def parse_frontmatter(text: str) -> tuple[str, list[str]]:
+def parse_frontmatter(text: str) -> tuple:
     m = re.match(r"^---\n(.*?)\n---\n", text, flags=re.DOTALL)
     if not m:
         return text, []
@@ -45,7 +45,7 @@ def parse_frontmatter(text: str) -> tuple[str, list[str]]:
     return text[m.end():], tags
 
 
-def chunk_markdown(path: Path) -> list[dict]:
+def chunk_markdown(path: Path) -> list:
     raw = path.read_text(encoding="utf-8")
     rel = str(path.relative_to(NOTES_DIR))
     modified_at = int(path.stat().st_mtime)
@@ -113,6 +113,14 @@ def main():
             print(f"  {path.relative_to(NOTES_DIR)}: {len(points)} chunk(s)")
 
     print(f"\nDone. {total} chunks indexed into '{COLLECTION}'.")
+
+    # Build wikilink graph for PPR augmentation in search_notes
+    try:
+        import graph as _graph
+        G = _graph.build_notes_graph(NOTES_DIR)
+        _graph.persist_notes_graph(G)
+    except Exception as e:
+        print(f"  notes graph build failed: {e}")
 
 
 if __name__ == "__main__":
