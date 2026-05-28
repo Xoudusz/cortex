@@ -329,14 +329,27 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     const pprRate = g.search_notes_calls > 0 ? ((g.ppr_fires / g.search_notes_calls) * 100).toFixed(1) + '%' : '—';
                     const total = g.graph_cache_hits + g.graph_cache_misses;
                     const cacheRate = total > 0 ? ((g.graph_cache_hits / total) * 100).toFixed(1) + '%' : '—';
-                    document.getElementById('graph-stats-body').innerHTML = [
+                    const rows = [
+                        ['version', '<span class="repo-badge">' + escapeHtml(g.version || '?') + '</span>'],
+                        ['started', g.started_at ? new Date(g.started_at).toLocaleString() : '—'],
                         ['search_code calls', g.search_code_calls],
                         ['centrality lift avg', avgLift + ' (across ' + g.centrality_lift_count + ' results)'],
                         ['search_notes calls', g.search_notes_calls],
                         ['PPR fires', g.ppr_fires + ' (' + pprRate + ' of calls)'],
                         ['PPR results added', g.ppr_results_added],
                         ['graph cache hit rate', cacheRate + ' (' + g.graph_cache_hits + '/' + total + ')'],
-                    ].map(([k, v]) => '<tr><td style="color:var(--text-muted);width:55%">' + escapeHtml(String(k)) + '</td><td>' + escapeHtml(String(v)) + '</td></tr>').join('');
+                    ];
+                    let html = rows.map(([k, v]) => '<tr><td style="color:var(--text-muted);width:55%">' + escapeHtml(String(k)) + '</td><td>' + v + '</td></tr>').join('');
+                    const hist = g.history || {};
+                    const histKeys = Object.keys(hist).sort().reverse();
+                    if (histKeys.length) {
+                        html += '<tr><td colspan="2" style="padding-top:0.75rem;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Past versions</td></tr>';
+                        histKeys.forEach(v => {
+                            const h = hist[v];
+                            html += '<tr><td style="color:var(--text-muted)">' + escapeHtml(v) + '</td><td style="font-size:0.75rem;color:var(--text-muted)">code: ' + (h.search_code_calls||0) + ' · notes: ' + (h.search_notes_calls||0) + ' · saved: ' + (h.last_saved ? new Date(h.last_saved).toLocaleDateString() : '?') + '</td></tr>';
+                        });
+                    }
+                    document.getElementById('graph-stats-body').innerHTML = html;
                 }
             } catch (err) { console.error('Failed to load stats:', err); }
         }
