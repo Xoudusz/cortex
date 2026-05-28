@@ -56,6 +56,16 @@ DEFAULT_REPOS = [
 
 _webhook_log: list = []
 _graph_cache: dict = {}
+_stats: dict = {
+    "search_code_calls": 0,
+    "centrality_lift_total": 0.0,
+    "centrality_lift_count": 0,
+    "search_notes_calls": 0,
+    "ppr_fires": 0,
+    "ppr_results_added": 0,
+    "graph_cache_hits": 0,
+    "graph_cache_misses": 0,
+}
 
 
 def _load_repos_meta() -> dict:
@@ -97,16 +107,20 @@ def _update_indexed_at(repo_name: str) -> None:
 def _get_code_graph_meta(repo_name: str) -> dict:
     """Load and cache code graph node metadata. Returns {file_rel: node_dict}."""
     if repo_name in _graph_cache:
+        _stats["graph_cache_hits"] += 1
         return _graph_cache[repo_name]
     path = DATA_DIR / f"graph_{repo_name}.json"
     if not path.exists():
+        _stats["graph_cache_misses"] += 1
         return {}
     try:
         data = json.loads(path.read_text())
         meta = {n["id"]: n for n in data.get("nodes", []) if "id" in n}
         _graph_cache[repo_name] = meta
+        _stats["graph_cache_misses"] += 1
         return meta
     except Exception:
+        _stats["graph_cache_misses"] += 1
         return {}
 
 
@@ -123,7 +137,7 @@ ONBOARDING_TEMPLATE = '''# Cortex Onboarding
 
 ## MCP Setup (if not connected)
 ```bash
-claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse \\
+claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse \
   --header "x-api-key: <get-from-user>"
 ```
 
@@ -190,6 +204,7 @@ def search_notes(query: str, limit: int = 5) -> str:
     PPR over wikilinks surfaces related notes beyond direct vector matches.
     Prefer this over asking the user to explain context they may have already written down.
     """
+    _stats["search_notes_calls"] += 1
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
     results = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
@@ -211,6 +226,8 @@ def search_notes(query: str, limit: int = 5) -> str:
         from graph import ppr_augment
         extras = ppr_augment(matched_files, matched_scores, DATA_DIR / "graph_notes.json")
         if extras:
+            _stats["ppr_fires"] += 1
+            _stats["ppr_results_added"] += len(extras)
             ppr_lines = ["**Related via wikilinks (PPR):**"]
             for e in extras:
                 ppr_lines.append(f"  -> {e['file']} (ppr: {e['ppr_score']})")
@@ -237,6 +254,7 @@ def search_code(query: str, limit: int = 5) -> str:
     Returns code chunks with file path, line numbers, language, score, centrality, community, and GitHub link.
     Always search before writing code for these repos — don't guess at existing patterns.
     """
+    _stats["search_code_calls"] += 1
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
     fetch_limit = min(limit * 3, 50)
@@ -249,6 +267,9 @@ def search_code(query: str, limit: int = 5) -> str:
         file_meta = _get_code_graph_meta(p.get("repo", "")).get(p.get("file", ""), {})
         centrality = file_meta.get("centrality", 0.0)
         boosted = r.score * (1.0 + 0.2 * centrality)
+        if centrality > 0:
+            _stats["centrality_lift_total"] += round(boosted - r.score, 4)
+            _stats["centrality_lift_count"] += 1
         scored.append((boosted, r, file_meta))
     scored.sort(key=lambda x: -x[0])
     parts = []
@@ -599,7 +620,7 @@ async def _api_reindex_handler(request: Request):
     return await api_reindex(request, _reindex_lock, _reindex_state, _run_reindex)
 
 async def _api_stats_handler(request: Request):
-    return await api_stats(request, QDRANT_URL, OLLAMA_URL)
+    return await api_stats(request, QDRANT_URL, OLLAMA_URL, _stats)
 
 
 async def _api_graph_handler(request: Request) -> JSONResponse:
