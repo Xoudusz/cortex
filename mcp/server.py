@@ -43,6 +43,9 @@ API_KEY         = os.environ.get("API_KEY", "")
 GITHUB_TOKEN    = os.environ.get("GITHUB_TOKEN", "")
 REPOS_CONFIG    = os.environ.get("REPOS_CONFIG", "/app/data/repos.json")
 DATA_DIR        = Path(REPOS_CONFIG).parent
+VERSION         = (Path("/app/VERSION").read_text().strip()
+                   if Path("/app/VERSION").exists() else "dev")
+STATS_FILE      = DATA_DIR / "stats.json"
 
 DEFAULT_REPOS = [
     "Xoudusz/weakness-dex",
@@ -56,16 +59,6 @@ DEFAULT_REPOS = [
 
 _webhook_log: list = []
 _graph_cache: dict = {}
-_stats: dict = {
-    "search_code_calls": 0,
-    "centrality_lift_total": 0.0,
-    "centrality_lift_count": 0,
-    "search_notes_calls": 0,
-    "ppr_fires": 0,
-    "ppr_results_added": 0,
-    "graph_cache_hits": 0,
-    "graph_cache_misses": 0,
-}
 
 
 def _load_repos_meta() -> dict:
@@ -131,13 +124,61 @@ def _invalidate_graph_cache(repo_name: str = "") -> None:
         _graph_cache.clear()
 
 
+def _default_stats() -> dict:
+    return {
+        "search_code_calls": 0,
+        "centrality_lift_total": 0.0,
+        "centrality_lift_count": 0,
+        "search_notes_calls": 0,
+        "ppr_fires": 0,
+        "ppr_results_added": 0,
+        "graph_cache_hits": 0,
+        "graph_cache_misses": 0,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _load_stats() -> dict:
+    defaults = _default_stats()
+    try:
+        if STATS_FILE.exists():
+            data = json.loads(STATS_FILE.read_text())
+            saved = data.get("versions", {}).get(VERSION, {})
+            if saved:
+                return {**defaults, **saved}
+    except Exception:
+        pass
+    return defaults
+
+
+def _save_stats() -> None:
+    try:
+        existing: dict = {}
+        if STATS_FILE.exists():
+            existing = json.loads(STATS_FILE.read_text()).get("versions", {})
+        existing[VERSION] = {**_stats, "last_saved": datetime.now(timezone.utc).isoformat()}
+        STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        STATS_FILE.write_text(json.dumps({"versions": existing}, indent=2))
+    except Exception as e:
+        log.warning("stats save failed: %s", e)
+
+
+def _stats_saver() -> None:
+    while True:
+        time.sleep(60)
+        _save_stats()
+
+
+_stats: dict = _load_stats()
+
+
 mcp = FastMCP("cortex", host=HOST, port=PORT)
 
 ONBOARDING_TEMPLATE = '''# Cortex Onboarding
 
 ## MCP Setup (if not connected)
 ```bash
-claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse \
+claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse \\
   --header "x-api-key: <get-from-user>"
 ```
 
@@ -620,7 +661,17 @@ async def _api_reindex_handler(request: Request):
     return await api_reindex(request, _reindex_lock, _reindex_state, _run_reindex)
 
 async def _api_stats_handler(request: Request):
-    return await api_stats(request, QDRANT_URL, OLLAMA_URL, _stats)
+    stats_payload = dict(_stats)
+    stats_payload["version"] = VERSION
+    try:
+        if STATS_FILE.exists():
+            all_versions = json.loads(STATS_FILE.read_text()).get("versions", {})
+            stats_payload["history"] = {v: d for v, d in all_versions.items() if v != VERSION}
+        else:
+            stats_payload["history"] = {}
+    except Exception:
+        stats_payload["history"] = {}
+    return await api_stats(request, QDRANT_URL, OLLAMA_URL, stats_payload)
 
 
 async def _api_graph_handler(request: Request) -> JSONResponse:
@@ -694,6 +745,7 @@ class _NormalizeSSEPath:
 if __name__ == "__main__":
     threading.Thread(target=warmup, daemon=True).start()
     threading.Thread(target=_start_watcher, daemon=True).start()
+    threading.Thread(target=_stats_saver, daemon=True).start()
     sse_app = mcp.sse_app()
     starlette_app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
