@@ -82,8 +82,6 @@ docker-compose.yml  # ollama + qdrant + cortex-mcp
 - Watchdog debounces 60s before triggering notes reindex (env: `WATCH_DEBOUNCE`)
 - Code indexer clones repos via `GITHUB_TOKEN` env var — required for private repos
 - Qdrant `query_points()` API (v1.17+) — `search()` is removed
-- CORS middleware wraps entire app — required for Claude Code CLI OAuth flow
-- `CORSMiddleware` is outermost layer so OPTIONS preflight bypasses `_BearerTokenMiddleware`
 
 ## Env vars
 

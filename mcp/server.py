@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 
 import uvicorn
 from starlette.applications import Starlette
-from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, Route
@@ -261,11 +260,5 @@ if __name__ == "__main__":
         Route("/token", _oauth.token_endpoint, methods=["POST"]),
         Mount("/sse", app=sse_app),
     ])
-    app = CORSMiddleware(
-        _NormalizeSSEPath(_BearerTokenMiddleware(starlette_app)),
-        allow_origins=["*"],
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Hub-Signature-256"],
-        expose_headers=["WWW-Authenticate"],
-    )
+    app = _NormalizeSSEPath(_BearerTokenMiddleware(starlette_app))
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
