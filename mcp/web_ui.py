@@ -193,6 +193,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             <div class="section">
                 <div class="section-title">Graph Efficiency</div>
                 <table class="webhook-table"><tbody id="graph-stats-body"><tr><td colspan="2" class="empty">Load admin tab to populate.</td></tr></tbody></table>
+                <div style="margin-top:0.5rem;text-align:right"><button id="history-btn" style="display:none;background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:0.3rem 0.75rem;font-size:0.8rem;cursor:pointer">Show past versions</button></div>
             </div>
             <div class="section">
                 <div class="section-title">Reindex</div>
@@ -402,16 +403,17 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                         ['graph cache hit rate', cacheRate + ' (' + g.graph_cache_hits + '/' + total + ')'],
                     ];
                     let html = rows.map(([k, v]) => '<tr><td style="color:var(--text-muted);width:55%">' + escapeHtml(String(k)) + '</td><td>' + v + '</td></tr>').join('');
+                    document.getElementById('graph-stats-body').innerHTML = html;
                     const hist = g.history || {};
                     const histKeys = Object.keys(hist).sort().reverse();
+                    const btn = document.getElementById('history-btn');
                     if (histKeys.length) {
-                        html += '<tr><td colspan="2" style="padding-top:0.75rem;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Past versions</td></tr>';
-                        histKeys.forEach(v => {
-                            const h = hist[v];
-                            html += '<tr><td style="color:var(--text-muted)">' + escapeHtml(v) + '</td><td style="font-size:0.75rem;color:var(--text-muted)">code: ' + (h.search_code_calls||0) + ' · notes: ' + (h.search_notes_calls||0) + ' · saved: ' + (h.last_saved ? new Date(h.last_saved).toLocaleDateString() : '?') + '</td></tr>';
-                        });
+                        btn.style.display = '';
+                        btn.textContent = 'Show past versions (' + histKeys.length + ')';
+                        btn.onclick = () => openHistoryModal(hist, histKeys);
+                    } else {
+                        btn.style.display = 'none';
                     }
-                    document.getElementById('graph-stats-body').innerHTML = html;
                 }
             } catch (err) { console.error('Failed to load stats:', err); }
         }
@@ -637,7 +639,34 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     node.attr('transform',d=>'translate('+d.x+','+d.y+')');
                 });
         }
+        function openHistoryModal(hist, keys) {
+            let html = '';
+            keys.forEach(v => {
+                const h = hist[v];
+                html += '<tr><td style="color:var(--text-muted);font-weight:600;width:35%">' + escapeHtml(v) + '</td>'
+                      + '<td style="font-size:0.78rem;color:var(--text-muted)">code: ' + (h.search_code_calls||0)
+                      + ' · notes: ' + (h.search_notes_calls||0)
+                      + ' · saved: ' + (h.last_saved ? new Date(h.last_saved).toLocaleDateString() : '?') + '</td></tr>';
+            });
+            document.getElementById('history-modal-body').innerHTML = html || '<tr><td class="empty" colspan="2">No data</td></tr>';
+            const m = document.getElementById('history-modal');
+            m.style.display = 'flex';
+            m.onclick = e => { if (e.target === m) closeHistoryModal(); };
+        }
+        function closeHistoryModal() {
+            document.getElementById('history-modal').style.display = 'none';
+        }
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeHistoryModal(); });
     </script>
+    <div id="history-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;width:90%;max-width:540px;max-height:80vh;overflow-y:auto">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+          <span style="font-weight:700;font-size:0.95rem">Past Versions</span>
+          <button onclick="closeHistoryModal()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem;line-height:1">&#x2715;</button>
+        </div>
+        <table class="webhook-table" style="width:100%"><tbody id="history-modal-body"></tbody></table>
+      </div>
+    </div>
 </body>
 </html>"""
 

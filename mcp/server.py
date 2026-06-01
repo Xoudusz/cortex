@@ -316,8 +316,17 @@ def search_code(query: str, limit: int = 5) -> str:
             _stats["centrality_lift_count"] += 1
         scored.append((boosted, r, file_meta))
     scored.sort(key=lambda x: -x[0])
+    seen_files: set = set()
+    deduped = []
+    for item in scored:
+        key = f"{item[1].payload.get('repo', '')}/{item[1].payload.get('file', '')}"
+        if key not in seen_files:
+            seen_files.add(key)
+            deduped.append(item)
+        if len(deduped) >= limit:
+            break
     parts = []
-    for boosted_score, r, file_meta in scored[:limit]:
+    for boosted_score, r, file_meta in deduped:
         p = r.payload
         centrality = file_meta.get("centrality")
         community = file_meta.get("community_id")
@@ -462,6 +471,26 @@ def reindex_status() -> str:
     if s["error"]:
         lines.append(f"Error: {s['error']}")
     return "\n\n".join(lines)
+
+
+@mcp.tool()
+def get_stats() -> str:
+    """Return current cortex efficiency metrics — search call counts, centrality lift, PPR rate, cache hit rate, queue depth."""
+    g = _stats
+    avg_lift = round(g["centrality_lift_total"] / g["centrality_lift_count"], 4) if g["centrality_lift_count"] > 0 else 0
+    ppr_rate = f"{g['ppr_fires'] / g['search_notes_calls'] * 100:.1f}%" if g["search_notes_calls"] > 0 else "—"
+    total_cache = g["graph_cache_hits"] + g["graph_cache_misses"]
+    cache_rate = f"{g['graph_cache_hits'] / total_cache * 100:.1f}%" if total_cache > 0 else "—"
+    return "\n".join([
+        f"version: {VERSION}",
+        f"search_code calls: {g['search_code_calls']}",
+        f"centrality lift avg: {avg_lift} (across {g['centrality_lift_count']} results)",
+        f"search_notes calls: {g['search_notes_calls']}",
+        f"PPR fires: {g['ppr_fires']} ({ppr_rate} of calls)",
+        f"PPR results added: {g['ppr_results_added']}",
+        f"graph cache hit rate: {cache_rate} ({g['graph_cache_hits']}/{total_cache})",
+        f"reindex queue depth: {_reindex_state.get('queue_depth', 0)}",
+    ])
 
 
 @mcp.tool()
