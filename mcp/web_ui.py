@@ -6,7 +6,6 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
-FAVICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><line x1='12' y1='3' x2='4' y2='9' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='12' y1='3' x2='20' y2='9' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='4' y1='9' x2='4' y2='15' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='20' y1='9' x2='20' y2='15' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='4' y1='15' x2='12' y2='21' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='20' y1='15' x2='12' y2='21' stroke='%238b5cf6' stroke-width='1.2' stroke-linecap='round'/><line x1='4' y1='9' x2='12' y2='12' stroke='%237c3aed' stroke-width='1' stroke-linecap='round'/><line x1='20' y1='9' x2='12' y2='12' stroke='%237c3aed' stroke-width='1' stroke-linecap='round'/><line x1='4' y1='15' x2='12' y2='12' stroke='%237c3aed' stroke-width='1' stroke-linecap='round'/><line x1='20' y1='15' x2='12' y2='12' stroke='%237c3aed' stroke-width='1' stroke-linecap='round'/><circle cx='12' cy='3' r='2.5' fill='%23a78bfa'/><circle cx='4' cy='9' r='2' fill='%238b5cf6'/><circle cx='20' cy='9' r='2' fill='%238b5cf6'/><circle cx='12' cy='12' r='2.5' fill='%23a78bfa'/><circle cx='4' cy='15' r='2' fill='%238b5cf6'/><circle cx='20' cy='15' r='2' fill='%238b5cf6'/><circle cx='12' cy='21' r='2.5' fill='%23a78bfa'/></svg>"
 
 LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" class="logo-svg">
   <defs>
@@ -40,7 +39,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cortex</title>
-    <link rel="icon" type="image/svg+xml" href="__FAVICON__">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
@@ -642,7 +641,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
 </body>
 </html>"""
 
-UI_HTML = _UI_TEMPLATE.replace("__FAVICON__", FAVICON).replace("__LOGO__", LOGO_SVG)
+UI_HTML = _UI_TEMPLATE.replace("__LOGO__", LOGO_SVG)
 
 
 async def ui(request: Request) -> HTMLResponse:

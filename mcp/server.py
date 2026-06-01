@@ -17,12 +17,12 @@ from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, Route
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from web_ui import ui, api_search, api_status, api_reindex, api_stats
+from web_ui import ui, api_search, api_status, api_reindex, api_stats, LOGO_SVG
 import oauth as _oauth
 
 logging.basicConfig(
@@ -581,7 +581,7 @@ class _NotesHandler(FileSystemEventHandler):
 
 
 class _BearerTokenMiddleware:
-    _UNPROTECTED = frozenset({"/health", "/webhook", "/register", "/authorize", "/token", "/"})
+    _UNPROTECTED = frozenset({"/health", "/webhook", "/register", "/authorize", "/token", "/", "/favicon.svg"})
 
     def __init__(self, app):
         self.app = app
@@ -609,6 +609,10 @@ class _BearerTokenMiddleware:
 
 async def health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
+
+
+async def favicon(request: Request) -> Response:
+    return Response(LOGO_SVG, media_type="image/svg+xml")
 
 
 async def webhook(request: Request) -> JSONResponse:
@@ -751,6 +755,7 @@ if __name__ == "__main__":
     sse_app = mcp.sse_app()
     starlette_app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
+        Route("/favicon.svg", favicon, methods=["GET"]),
         Route("/webhook", webhook, methods=["POST"]),
         Route("/", _ui_handler, methods=["GET"]),
         Route("/api/search", _api_search_handler, methods=["POST"]),
