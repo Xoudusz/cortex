@@ -14,7 +14,7 @@ from starlette.responses import JSONResponse, Response
 from config import DATA_DIR, GITHUB_TOKEN, OLLAMA_URL, QDRANT_URL, STATS_FILE, VERSION, WEBHOOK_SECRET, embed
 from state import _reindex_log, _stats, _webhook_log
 from repos import _load_repos, _load_repos_meta, _save_repos
-from reindex import _enqueue, _job_lock, _job_queue, _reindex_state
+from reindex import _enqueue, get_status, get_queue_snapshot
 from web_ui import LOGO_SVG, api_search, api_stats, api_status, ui
 
 log = logging.getLogger("cortex")
@@ -86,9 +86,7 @@ async def _api_search_handler(request: Request):
 
 async def _api_status_handler(request: Request):
     """Return the current reindex job state and queue snapshot."""
-    with _job_lock:
-        queue_snapshot = [{"notes": j["notes"], "code": j["code"], "repo": j.get("repo", "")} for j in _job_queue]
-    return await api_status(request, _reindex_state, queue_snapshot)
+    return await api_status(request, get_status(), get_queue_snapshot())
 
 
 async def _api_reindex_handler(request: Request):

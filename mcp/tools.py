@@ -12,7 +12,7 @@ from qdrant_client import QdrantClient
 from config import HOST, PORT, QDRANT_URL, DATA_DIR, VERSION, embed
 from state import _stats, _get_code_graph_meta, _load_all_stats
 from onboarding import ONBOARDING_TEMPLATE, _merge_onboarding
-from reindex import _enqueue, _reindex_state
+from reindex import _enqueue, get_status
 
 log = logging.getLogger("cortex")
 
@@ -171,14 +171,14 @@ def reindex(notes: bool = True, code: bool = True, repo: str = "") -> str:
     Set repo to a specific repo name (e.g. "svelte-radio") to only reindex that repo.
     """
     _enqueue(notes, code, repo, files=None)
-    q = _reindex_state["queue_depth"]
+    q = get_status()["queue_depth"]
     return f"Reindex queued (position {q}). Use reindex_status() to check progress."
 
 
 @mcp.tool()
 def reindex_status() -> str:
     """Check whether a reindex is running or finished, and see its output log."""
-    s = _reindex_state
+    s = get_status()
     q = s.get("queue_depth", 0)
     if s["started_at"] is None:
         idle = "No reindex has been run yet."
@@ -264,7 +264,7 @@ def get_stats(all: bool = False) -> str:
             blocks.append(_fmt_version_stats(v, g, current=(v == VERSION)))
         return "=== All versions ===\n\n" + "\n\n".join(blocks)
 
-    queue_depth = _reindex_state.get("queue_depth", 0)
+    queue_depth = get_status().get("queue_depth", 0)
     out = _fmt_version_stats(VERSION, _stats, current=True)
     if queue_depth:
         out += f"\n  reindex queue depth: {queue_depth}"

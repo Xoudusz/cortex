@@ -81,7 +81,12 @@ docker-compose.yml  # ollama + qdrant + cortex-mcp
 
 ## Key patterns
 
-- Import chain (no circular deps): `config` ← `state` ← `repos` ← `onboarding` (leaf modules); `reindex` ← `state`/`repos`; `tools`/`routes` ← all leaves; `server` ← everything
+- 4-layer architecture (deps flow downward only):
+  - **Foundation**: `config`, `oauth`, `template`, `onboarding` — no local deps
+  - **Domain**: `state`, `repos` ← config
+  - **Service**: `reindex` ← state, repos; exposes `_enqueue()`, `get_status()`, `get_queue_snapshot()` as public API
+  - **Transport**: `routes` (HTTP), `tools` (MCP) ← service API only; `middleware`, `watcher` ← config/service
+  - **Composition**: `server` ← everything
 - `mcp.sse_app()` returns Starlette app — mounted at `/sse` in server.py
 - `_job_queue` (deque) + `_reindex_worker` thread processes jobs sequentially — webhooks/watcher/MCP tool all call `_enqueue()`, nothing dropped
 - `_enqueue()` coalesces same-repo incremental webhook jobs (merges file lists instead of queuing duplicate)

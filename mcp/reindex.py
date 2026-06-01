@@ -126,3 +126,15 @@ def _reindex_worker() -> None:
                 "error": _reindex_state.get("error"),
             })
             _reindex_log[:] = _reindex_log[:50]
+
+
+def get_status() -> dict:
+    """Return a snapshot of current reindex state (safe copy for callers)."""
+    return dict(_reindex_state)
+
+
+def get_queue_snapshot() -> list:
+    """Return a serializable snapshot of queued jobs; acquires _job_lock internally."""
+    with _job_lock:
+        return [{"notes": j["notes"], "code": j["code"], "repo": j.get("repo", "")}
+                for j in _job_queue]
