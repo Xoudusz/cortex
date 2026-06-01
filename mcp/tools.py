@@ -3,6 +3,7 @@
 
 import logging
 import time
+from datetime import datetime, timezone
 
 from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
@@ -10,7 +11,7 @@ from qdrant_client import QdrantClient
 from config import (
     HOST, PORT, QDRANT_URL, DATA_DIR, VERSION,
     ONBOARDING_TEMPLATE, _merge_onboarding,
-    _stats, embed, _get_code_graph_meta,
+    _stats, embed, _get_code_graph_meta, _load_all_stats,
 )
 from reindex import _enqueue, _reindex_state, _job_queue
 
@@ -39,6 +40,7 @@ def search_notes(query: str, limit: int = 5) -> str:
     results = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
     if not results:
         return "No results found."
+    _stats["total_results_notes"] += len(results)
     parts = []
     matched_files = []
     matched_scores = []
@@ -110,6 +112,7 @@ def search_code(query: str, limit: int = 5) -> str:
             deduped.append(item)
         if len(deduped) >= limit:
             break
+    _stats["total_results_code"] += len(deduped)
     parts = []
     for boosted_score, r, file_meta in deduped:
         p = r.payload
@@ -168,24 +171,69 @@ def reindex_status() -> str:
     return "\n\n".join(lines)
 
 
-@mcp.tool()
-def get_stats() -> str:
-    """Return current cortex efficiency metrics — search call counts, centrality lift, PPR rate, cache hit rate, queue depth."""
-    g = _stats
-    avg_lift = round(g["centrality_lift_total"] / g["centrality_lift_count"], 4) if g["centrality_lift_count"] > 0 else 0
-    ppr_rate = f"{g['ppr_fires'] / g['search_notes_calls'] * 100:.1f}%" if g["search_notes_calls"] > 0 else "—"
-    total_cache = g["graph_cache_hits"] + g["graph_cache_misses"]
+def _fmt_version_stats(v: str, g: dict, current: bool = False) -> str:
+    total_searches = g.get("search_code_calls", 0) + g.get("search_notes_calls", 0)
+    ppr_rate = f"{g['ppr_fires'] / g['search_notes_calls'] * 100:.1f}%" if g.get("search_notes_calls", 0) > 0 else "—"
+    avg_ppr = round(g["ppr_results_added"] / g["ppr_fires"], 1) if g.get("ppr_fires", 0) > 0 else "—"
+    total_cache = g.get("graph_cache_hits", 0) + g.get("graph_cache_misses", 0)
     cache_rate = f"{g['graph_cache_hits'] / total_cache * 100:.1f}%" if total_cache > 0 else "—"
-    return "\n".join([
-        f"version: {VERSION}",
-        f"search_code calls: {g['search_code_calls']}",
-        f"centrality lift avg: {avg_lift} (across {g['centrality_lift_count']} results)",
-        f"search_notes calls: {g['search_notes_calls']}",
-        f"PPR fires: {g['ppr_fires']} ({ppr_rate} of calls)",
-        f"PPR results added: {g['ppr_results_added']}",
-        f"graph cache hit rate: {cache_rate} ({g['graph_cache_hits']}/{total_cache})",
-        f"reindex queue depth: {_reindex_state.get('queue_depth', 0)}",
-    ])
+    avg_lift = round(g["centrality_lift_total"] / g["centrality_lift_count"], 4) if g.get("centrality_lift_count", 0) > 0 else 0
+    total_results = g.get("total_results_code", 0) + g.get("total_results_notes", 0)
+    avg_results = round(total_results / total_searches, 1) if total_searches > 0 else "—"
+    notes_pct = f"{g['search_notes_calls'] / total_searches * 100:.0f}%" if total_searches > 0 else "—"
+
+    label = f"{v} (current)" if current else v
+    lines = [label]
+
+    started = g.get("started_at", "")
+    if current and started:
+        try:
+            delta = datetime.now(timezone.utc) - datetime.fromisoformat(started)
+            h, rem = divmod(int(delta.total_seconds()), 3600)
+            m = rem // 60
+            lines.append(f"  uptime: {h}h {m}m")
+        except Exception:
+            pass
+    elif started:
+        last = g.get("last_saved", "")
+        period = started[:10]
+        if last:
+            period += f" → {last[:10]}"
+        lines.append(f"  period: {period}")
+
+    lines += [
+        f"  searches: code={g.get('search_code_calls', 0)} notes={g.get('search_notes_calls', 0)}  total={total_searches}  (notes {notes_pct})",
+        f"  results: code={g.get('total_results_code', 0)} notes={g.get('total_results_notes', 0)}  avg/search={avg_results}",
+        f"  centrality lift avg: {avg_lift} (across {g.get('centrality_lift_count', 0)} results)",
+        f"  PPR: {g.get('ppr_fires', 0)} fires ({ppr_rate} of note searches) · +{g.get('ppr_results_added', 0)} results · avg {avg_ppr}/fire",
+        f"  graph cache: {cache_rate} ({g.get('graph_cache_hits', 0)}/{total_cache})",
+        f"  reindexes: {g.get('reindex_count', 0)}",
+    ]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_stats(all: bool = False) -> str:
+    """Return cortex efficiency metrics.
+
+    all=False (default): current version stats with uptime, search mix, PPR effectiveness, cache, centrality lift.
+    all=True: all persisted versions side-by-side for comparison.
+    """
+    if all:
+        versions = _load_all_stats()
+        if not versions:
+            return "No persisted stats found. Stats save every 60s."
+        blocks = []
+        for v in sorted(versions):
+            g = versions[v]
+            blocks.append(_fmt_version_stats(v, g, current=(v == VERSION)))
+        return "=== All versions ===\n\n" + "\n\n".join(blocks)
+
+    queue_depth = _reindex_state.get("queue_depth", 0)
+    out = _fmt_version_stats(VERSION, _stats, current=True)
+    if queue_depth:
+        out += f"\n  reindex queue depth: {queue_depth}"
+    return out
 
 
 @mcp.tool()

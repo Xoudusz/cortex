@@ -122,6 +122,9 @@ def _default_stats() -> dict:
         "ppr_results_added": 0,
         "graph_cache_hits": 0,
         "graph_cache_misses": 0,
+        "reindex_count": 0,
+        "total_results_code": 0,
+        "total_results_notes": 0,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -137,6 +140,15 @@ def _load_stats() -> dict:
     except Exception:
         pass
     return defaults
+
+
+def _load_all_stats() -> dict:
+    try:
+        if STATS_FILE.exists():
+            return json.loads(STATS_FILE.read_text()).get("versions", {})
+    except Exception:
+        pass
+    return {}
 
 
 def _save_stats() -> None:

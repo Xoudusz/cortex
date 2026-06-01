@@ -67,6 +67,7 @@ def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=No
         t = time.time()
         elapsed = t - _reindex_state["started_at"]
         _reindex_state.update(running=False, done=True, finished_at=t, current_job=None)
+        _stats["reindex_count"] += 1
         log.info("reindex finished in %.0fs", elapsed)
 
 
