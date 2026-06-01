@@ -5,3 +5,4 @@ watchdog
 uvicorn
 starlette
 networkx
+scipy
