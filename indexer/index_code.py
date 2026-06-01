@@ -173,31 +173,38 @@ def main():
 
         print(f"  {name}: {total} chunks from {len(code_files)} files", flush=True)
 
-        if not incremental:
-            # Skip graph rebuild on incremental runs — building from only the changed files
-            # would overwrite graph_{name}.json with a tiny subset, breaking get_neighbors
-            # and centrality for all other files. Full graph rebuilt on next full reindex.
-            try:
-                import graph as _graph
-                G = _graph.build_code_graph(repo_path, set(file_point_ids.keys()))
-                if G is not None:
-                    metadata = _graph.compute_code_metadata(G)
-                    _graph.persist_code_graph(G, metadata, name)
-                    for file_rel, meta in metadata.items():
-                        point_ids = file_point_ids.get(file_rel, [])
-                        if point_ids:
-                            client.set_payload(
-                                collection_name=COLLECTION,
-                                payload={
-                                    "centrality": meta["centrality"],
-                                    "community_id": meta["community_id"],
-                                    "imports": meta["imports"],
-                                    "imported_by": meta["imported_by"],
-                                },
-                                points=point_ids,
-                            )
-            except Exception as e:
-                print(f"  graph build failed for {name}: {e}", flush=True)
+        try:
+            import graph as _graph
+            if incremental:
+                # Build from all repo files so the persisted graph stays complete.
+                # file_point_ids only has changed files; using it would clobber graph_{name}.json.
+                graph_files = set(
+                    str(p.relative_to(repo_path))
+                    for p in repo_path.rglob("*")
+                    if p.is_file() and p.suffix in CODE_EXTS
+                    and not any(s in p.parts for s in SKIP_DIRS)
+                )
+            else:
+                graph_files = set(file_point_ids.keys())
+            G = _graph.build_code_graph(repo_path, graph_files)
+            if G is not None:
+                metadata = _graph.compute_code_metadata(G)
+                _graph.persist_code_graph(G, metadata, name)
+                for file_rel, meta in metadata.items():
+                    point_ids = file_point_ids.get(file_rel, [])
+                    if point_ids:
+                        client.set_payload(
+                            collection_name=COLLECTION,
+                            payload={
+                                "centrality": meta["centrality"],
+                                "community_id": meta["community_id"],
+                                "imports": meta["imports"],
+                                "imported_by": meta["imported_by"],
+                            },
+                            points=point_ids,
+                        )
+        except Exception as e:
+            print(f"  graph build failed for {name}: {e}", flush=True)
 
     print("\nDone.", flush=True)
 
