@@ -418,7 +418,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 const data = await api('/api/webhook-log');
                 const log = data.log || [];
                 if (!log.length) { wrap.innerHTML = '<div class="empty">No webhooks received yet.</div>'; return; }
-                wrap.innerHTML = '<table class="webhook-table"><thead><tr><th>Repo</th><th>Time</th><th>Status</th></tr></thead><tbody>' + log.map(e => '<tr><td>' + escapeHtml(e.repo) + '</td><td>' + timeAgo(e.ts) + '</td><td class="' + (e.status === 'triggered' ? 'wh-triggered' : 'wh-skipped') + '">' + escapeHtml(e.status) + '</td></tr>').join('') + '</tbody></table>';
+                wrap.innerHTML = '<table class="webhook-table"><thead><tr><th>Repo</th><th>Time</th><th>Status</th></tr></thead><tbody>' + log.map(e => '<tr><td>' + escapeHtml(e.repo) + '</td><td>' + timeAgo(e.ts) + '</td><td class="' + (e.status === 'triggered' || e.status === 'merged' ? 'wh-triggered' : 'wh-skipped') + '">' + escapeHtml(e.status) + '</td></tr>').join('') + '</tbody></table>';
             } catch (err) { wrap.innerHTML = '<div class="empty">Failed to load webhook log.</div>'; }
         }
 

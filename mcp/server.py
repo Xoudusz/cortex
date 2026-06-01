@@ -120,8 +120,7 @@ async def webhook(request: Request) -> JSONResponse:
     except Exception:
         repo, changed, removed = "", [], []
     ts = datetime.now(timezone.utc).isoformat()
-    _enqueue(False, True, repo, files=changed or None, removed=removed)
-    status = "queued" if not _reindex_state["running"] else "queued (worker busy)"
+    status = _enqueue(False, True, repo, files=changed or None, removed=removed)
     _webhook_log.insert(0, {"repo": repo or "unknown", "ts": ts, "status": status, "files": len(changed)})
     _webhook_log[:] = _webhook_log[:50]
     log.info("[webhook] push on %s -> %d changed, %d removed -> %s", repo or "unknown", len(changed), len(removed), status)
