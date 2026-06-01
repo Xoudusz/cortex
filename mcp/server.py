@@ -256,6 +256,7 @@ if __name__ == "__main__":
                 DATA_DIR / "cortex.log", maxBytes=5 * 1024 * 1024, backupCount=3
             ),
         ],
+        force=True,
     )
     threading.Thread(target=warmup, daemon=True).start()
     threading.Thread(target=_start_watcher, daemon=True).start()
