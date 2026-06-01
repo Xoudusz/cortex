@@ -23,7 +23,7 @@ from starlette.routing import Mount, Route
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from web_ui import ui, api_search, api_status, api_reindex, api_stats, LOGO_SVG
+from web_ui import ui, api_search, api_status, api_stats, LOGO_SVG
 import oauth as _oauth
 
 logging.basicConfig(
@@ -729,7 +729,12 @@ async def _api_status_handler(request: Request):
     return await api_status(request, _reindex_state)
 
 async def _api_reindex_handler(request: Request):
-    return await api_reindex(request, _reindex_lock, _reindex_state, _run_reindex)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    _enqueue(body.get("notes", True), body.get("code", True), body.get("repo", ""), files=None)
+    return JSONResponse({"status": "queued"})
 
 async def _api_stats_handler(request: Request):
     stats_payload = dict(_stats)
