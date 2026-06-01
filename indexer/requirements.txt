@@ -1,5 +1,6 @@
 httpx
 qdrant-client
+fastembed
 tree-sitter>=0.22
 tree-sitter-python
 tree-sitter-javascript

@@ -8,8 +8,9 @@ from datetime import datetime, timezone
 
 from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
+from qdrant_client.models import Prefetch, Fusion, SparseVector
 
-from config import HOST, PORT, QDRANT_URL, DATA_DIR, VERSION, embed
+from config import HOST, PORT, QDRANT_URL, DATA_DIR, VERSION, embed, sparse_embed
 from state import _stats, _get_code_graph_meta, _load_all_stats
 from onboarding import ONBOARDING_TEMPLATE, _merge_onboarding
 from reindex import _enqueue, get_status
@@ -71,7 +72,17 @@ def search_notes(query: str, limit: int = 5) -> str:
     _stats["search_notes_calls"] += 1
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
-    results = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
+    idx, vals = sparse_embed(query)
+    results = client.query_points(
+        "notes",
+        prefetch=[
+            Prefetch(query=vector, using=None, limit=limit * 2),
+            Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2),
+        ],
+        query=Fusion.RRF,
+        limit=limit,
+        with_payload=True,
+    ).points
     if not results:
         return "No results found."
     _stats["total_results_notes"] += len(results)
@@ -113,8 +124,18 @@ def search_code(query: str, limit: int = 5) -> str:
     _stats["search_code_calls"] += 1
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
+    idx, vals = sparse_embed(query)
     fetch_limit = min(limit * 3, 50)
-    results = client.query_points("code", query=vector, limit=fetch_limit, with_payload=True).points
+    results = client.query_points(
+        "code",
+        prefetch=[
+            Prefetch(query=vector, using=None, limit=fetch_limit),
+            Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=fetch_limit),
+        ],
+        query=Fusion.RRF,
+        limit=fetch_limit,
+        with_payload=True,
+    ).points
     if not results:
         return "No results found."
     scored = []

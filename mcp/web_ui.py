@@ -4,7 +4,7 @@ import time
 
 import httpx
 from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchValue
+from qdrant_client.models import Filter, FieldCondition, MatchValue, Prefetch, Fusion, SparseVector
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
@@ -16,8 +16,8 @@ async def ui(request: Request) -> HTMLResponse:
     return HTMLResponse(UI_HTML)
 
 
-async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONResponse:
-    """Semantic search over notes and/or code collections; returns scored results."""
+async def api_search(request: Request, qdrant_url: str, embed_fn, sparse_embed_fn=None) -> JSONResponse:
+    """Hybrid search (dense + BM25 RRF) over notes and/or code collections; returns scored results."""
     try:
         body = await request.json()
     except Exception:
@@ -30,17 +30,44 @@ async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONRespons
     repo_filter = body.get("repo", "").strip()
     client = QdrantClient(url=qdrant_url)
     vector = embed_fn(query)
+    sparse = sparse_embed_fn(query) if sparse_embed_fn else None
     result = {}
     if "notes" in collections:
         try:
-            points = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
+            if sparse:
+                idx, vals = sparse
+                points = client.query_points(
+                    "notes",
+                    prefetch=[
+                        Prefetch(query=vector, using=None, limit=limit * 2),
+                        Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2),
+                    ],
+                    query=Fusion.RRF,
+                    limit=limit,
+                    with_payload=True,
+                ).points
+            else:
+                points = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
             result["notes"] = [{"file": p.payload.get("file", ""), "heading": p.payload.get("heading", ""), "text": p.payload.get("text", ""), "tags": p.payload.get("tags", []), "score": round(p.score, 4)} for p in points]
         except Exception as e:
             result["notes"] = []; result["notes_error"] = str(e)
     if "code" in collections:
         try:
             q_filter = Filter(must=[FieldCondition(key="repo", match=MatchValue(value=repo_filter))]) if repo_filter else None
-            points = client.query_points("code", query=vector, limit=limit, with_payload=True, query_filter=q_filter).points
+            if sparse:
+                idx, vals = sparse
+                points = client.query_points(
+                    "code",
+                    prefetch=[
+                        Prefetch(query=vector, using=None, limit=limit * 2, filter=q_filter),
+                        Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2, filter=q_filter),
+                    ],
+                    query=Fusion.RRF,
+                    limit=limit,
+                    with_payload=True,
+                ).points
+            else:
+                points = client.query_points("code", query=vector, limit=limit, with_payload=True, query_filter=q_filter).points
             result["code"] = [{"repo": p.payload.get("repo", ""), "file": p.payload.get("file", ""), "start_line": p.payload.get("start_line", 0), "end_line": p.payload.get("end_line", 0), "language": p.payload.get("language", ""), "text": p.payload.get("text", ""), "github_url": p.payload.get("github_url", ""), "score": round(p.score, 4)} for p in points]
         except Exception as e:
             result["code"] = []; result["code_error"] = str(e)

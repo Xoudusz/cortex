@@ -11,7 +11,7 @@ import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from config import DATA_DIR, GITHUB_TOKEN, OLLAMA_URL, QDRANT_URL, STATS_FILE, VERSION, WEBHOOK_SECRET, embed
+from config import DATA_DIR, GITHUB_TOKEN, OLLAMA_URL, QDRANT_URL, STATS_FILE, VERSION, WEBHOOK_SECRET, embed, sparse_embed
 from state import _reindex_log, _stats, _webhook_log
 from repos import _load_repos, _load_repos_meta, _save_repos
 from reindex import _enqueue, get_status, get_queue_snapshot
@@ -81,7 +81,7 @@ async def _ui_handler(request: Request):
 
 async def _api_search_handler(request: Request):
     """Proxy semantic search requests to the Qdrant-backed search handler."""
-    return await api_search(request, QDRANT_URL, embed)
+    return await api_search(request, QDRANT_URL, embed, sparse_embed)
 
 
 async def _api_status_handler(request: Request):

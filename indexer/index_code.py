@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelector, MatchValue, PointStruct, VectorParams
+from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelector, MatchValue, PointStruct, SparseVector, SparseVectorParams, VectorParams
 
 from chunker import chunk_file, CODE_EXTS, SKIP_DIRS, REPOS_DIR
 from cache import load_cache, save_cache
@@ -59,6 +59,18 @@ def embed(text: str) -> list:
     )
     resp.raise_for_status()
     return resp.json()["embedding"]
+
+
+_bm25 = None
+
+
+def sparse_embed(text: str) -> tuple:
+    global _bm25
+    if _bm25 is None:
+        from fastembed import SparseTextEmbedding
+        _bm25 = SparseTextEmbedding(model_name="Qdrant/bm25")
+    e = list(_bm25.embed([text[:4000]]))[0]
+    return e.indices.tolist(), e.values.tolist()
 
 
 def clone_or_pull(repo: str) -> Path:
@@ -115,6 +127,12 @@ def main():
         )
         print(f"Created collection '{COLLECTION}'", flush=True)
 
+    coll_info = client.get_collection(COLLECTION)
+    sparse_migration = not bool(coll_info.config.params.sparse_vectors_config)
+    if sparse_migration:
+        client.update_collection(COLLECTION, sparse_vectors_config={"sparse": SparseVectorParams()})
+        print(f"  Added sparse vector config to '{COLLECTION}' — forcing full re-embed for migration", flush=True)
+
     from chunker import _TS_AVAILABLE
     print(f"Chunking mode: {'tree-sitter' if _TS_AVAILABLE else 'sliding-window (fallback)'}", flush=True)
 
@@ -157,7 +175,7 @@ def main():
 
         if not incremental:
             file_cache = load_cache("code")
-            if client.get_collection(COLLECTION).points_count == 0:
+            if sparse_migration or client.get_collection(COLLECTION).points_count == 0:
                 file_cache = {}
             new_file_cache = dict(file_cache)
             cached_files = 0
@@ -185,7 +203,12 @@ def main():
                 cid = int(hashlib.md5(
                     f"{chunk['repo']}:{chunk['file']}:{chunk['start_line']}".encode()
                 ).hexdigest()[:8], 16)
-                points.append(PointStruct(id=cid, vector=embed(chunk["text"]), payload=chunk))
+                idx, vals = sparse_embed(chunk["text"])
+                points.append(PointStruct(
+                    id=cid,
+                    vector={"": embed(chunk["text"]), "sparse": SparseVector(indices=idx, values=vals)},
+                    payload=chunk,
+                ))
                 file_point_ids.setdefault(chunk["file"], []).append(cid)
             if points:
                 client.upsert(COLLECTION, points)

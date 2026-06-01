@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, PointStruct, SparseVector, SparseVectorParams, VectorParams
 
 from cache import load_cache, save_cache
 
@@ -28,6 +28,18 @@ def embed(text: str) -> list:
     )
     resp.raise_for_status()
     return resp.json()["embedding"]
+
+
+_bm25 = None
+
+
+def sparse_embed(text: str) -> tuple:
+    global _bm25
+    if _bm25 is None:
+        from fastembed import SparseTextEmbedding
+        _bm25 = SparseTextEmbedding(model_name="Qdrant/bm25")
+    e = list(_bm25.embed([text[:4000]]))[0]
+    return e.indices.tolist(), e.values.tolist()
 
 
 def parse_frontmatter(text: str) -> tuple:
@@ -94,11 +106,19 @@ def main():
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE))
         print(f"Created collection '{COLLECTION}'")
 
+    coll_info = client.get_collection(COLLECTION)
+    if not coll_info.config.params.sparse_vectors_config:
+        client.update_collection(COLLECTION, sparse_vectors_config={"sparse": SparseVectorParams()})
+        print("  Added sparse vector config to 'notes' — forcing full re-embed for migration", flush=True)
+        cache_override = True
+    else:
+        cache_override = False
+
     md_files = [p for p in NOTES_DIR.rglob("*.md")
                 if ".obsidian" not in p.parts and ".git" not in p.parts]
 
     cache = load_cache("notes")
-    if client.get_collection(COLLECTION).points_count == 0:
+    if cache_override or client.get_collection(COLLECTION).points_count == 0:
         cache = {}
     new_cache = {}
     total = 0
@@ -113,15 +133,15 @@ def main():
             continue
 
         chunks = chunk_markdown(path)
-        points = [
-            PointStruct(
+        points = []
+        for c in chunks:
+            idx, vals = sparse_embed(c["text"])
+            points.append(PointStruct(
                 id=chunk_id(c["file"], c["heading"]),
-                vector=embed(c["text"]),
+                vector={"": embed(c["text"]), "sparse": SparseVector(indices=idx, values=vals)},
                 payload={"file": c["file"], "heading": c["heading"], "text": c["text"],
                          "tags": c["tags"], "modified_at": c["modified_at"]},
-            )
-            for c in chunks
-        ]
+            ))
         if points:
             client.upsert(COLLECTION, points)
             total += len(points)

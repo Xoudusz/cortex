@@ -43,6 +43,19 @@ def embed(text: str) -> list:
     return resp.json()["embedding"]
 
 
+_bm25: object = None
+
+
+def sparse_embed(text: str) -> tuple:
+    """Return (indices, values) BM25 sparse vector for text via fastembed Qdrant/bm25."""
+    global _bm25
+    if _bm25 is None:
+        from fastembed import SparseTextEmbedding
+        _bm25 = SparseTextEmbedding(model_name="Qdrant/bm25")
+    e = list(_bm25.embed([text[:4000]]))[0]
+    return e.indices.tolist(), e.values.tolist()
+
+
 def warmup() -> None:
     """Send a dummy embedding request to pre-load the model into Ollama's memory."""
     try:

@@ -1,6 +1,7 @@
 mcp[cli]
 httpx
 qdrant-client
+fastembed
 watchdog
 uvicorn
 starlette
