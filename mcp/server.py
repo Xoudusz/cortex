@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
+import logging.handlers
 import os
 import threading
 from datetime import datetime, timezone
@@ -231,6 +232,16 @@ def _start_watcher():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.handlers.RotatingFileHandler(
+                DATA_DIR / "cortex.log", maxBytes=5 * 1024 * 1024, backupCount=3
+            ),
+        ],
+    )
     threading.Thread(target=warmup, daemon=True).start()
     threading.Thread(target=_start_watcher, daemon=True).start()
     threading.Thread(target=_stats_saver, daemon=True).start()
