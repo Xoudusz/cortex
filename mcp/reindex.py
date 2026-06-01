@@ -62,7 +62,7 @@ def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=No
         log.info("reindex finished in %.0fs", elapsed)
 
 
-def _enqueue(notes: bool, code: bool, repo: str = "", files=None, removed=None) -> str:
+def _enqueue(notes: bool, code: bool, repo: str = "", files=None, removed=None, _log_entry=None) -> str:
     with _job_lock:
         if files is not None and code:
             for job in _job_queue:
@@ -71,7 +71,7 @@ def _enqueue(notes: bool, code: bool, repo: str = "", files=None, removed=None) 
                     job["removed"] = list(set(job.get("removed", []) + (removed or [])))
                     log.info("[queue] merged %d files into queued job for %s", len(files), repo)
                     return "merged"
-        _job_queue.append({"notes": notes, "code": code, "repo": repo, "files": files, "removed": removed or []})
+        _job_queue.append({"notes": notes, "code": code, "repo": repo, "files": files, "removed": removed or [], "_log_entry": _log_entry})
         _reindex_state["queue_depth"] = len(_job_queue)
     _worker_event.set()
     return "triggered"
@@ -88,3 +88,6 @@ def _reindex_worker() -> None:
                 job = _job_queue.popleft()
                 _reindex_state["queue_depth"] = len(_job_queue)
             _run_reindex(job["notes"], job["code"], job.get("repo", ""), job.get("files"), job.get("removed", []))
+            entry = job.get("_log_entry")
+            if entry:
+                entry["status"] = "failed" if _reindex_state.get("error") else "done"

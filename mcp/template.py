@@ -115,6 +115,8 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         .webhook-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(45,50,72,0.5); font-family: 'SF Mono', Consolas, monospace; }
         .webhook-table tr:last-child td { border-bottom: none; }
         .wh-triggered { color: var(--success); }
+        .wh-done { color: var(--text-muted); }
+        .wh-failed { color: #f87171; }
         .wh-skipped { color: var(--text-muted); }
         .repo-item { display: flex; justify-content: space-between; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.625rem 0.875rem; margin-bottom: 0.4rem; transition: border-color 0.15s; }
         .repo-item:hover { border-color: rgba(167,139,250,0.25); }
@@ -422,7 +424,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 const data = await api('/api/webhook-log');
                 const log = data.log || [];
                 if (!log.length) { wrap.innerHTML = '<div class="empty">No webhooks received yet.</div>'; return; }
-                wrap.innerHTML = '<table class="webhook-table"><thead><tr><th>Repo</th><th>Time</th><th>Status</th></tr></thead><tbody>' + log.map(e => '<tr><td>' + escapeHtml(e.repo) + '</td><td>' + timeAgo(e.ts) + '</td><td class="' + (e.status === 'triggered' || e.status === 'merged' ? 'wh-triggered' : 'wh-skipped') + '">' + escapeHtml(e.status) + '</td></tr>').join('') + '</tbody></table>';
+                wrap.innerHTML = '<table class="webhook-table"><thead><tr><th>Repo</th><th>Time</th><th>Status</th></tr></thead><tbody>' + log.map(e => '<tr><td>' + escapeHtml(e.repo) + '</td><td>' + timeAgo(e.ts) + '</td><td class="' + (e.status === 'triggered' || e.status === 'merged' ? 'wh-triggered' : e.status === 'done' ? 'wh-done' : e.status === 'failed' ? 'wh-failed' : 'wh-skipped') + '">' + escapeHtml(e.status) + '</td></tr>').join('') + '</tbody></table>';
             } catch (err) { wrap.innerHTML = '<div class="empty">Failed to load webhook log.</div>'; }
         }
 

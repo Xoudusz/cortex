@@ -38,10 +38,10 @@ try:
     }
     _TS_SEMANTIC: dict = {
         ".py":  {"function_definition", "class_definition"},
-        ".js":  {"function_declaration", "class_declaration", "method_definition"},
-        ".jsx": {"function_declaration", "class_declaration", "method_definition"},
-        ".ts":  {"function_declaration", "class_declaration", "method_definition", "interface_declaration"},
-        ".tsx": {"function_declaration", "class_declaration", "method_definition", "interface_declaration"},
+        ".js":  {"function_declaration", "class_declaration", "method_definition", "lexical_declaration"},
+        ".jsx": {"function_declaration", "class_declaration", "method_definition", "lexical_declaration"},
+        ".ts":  {"function_declaration", "class_declaration", "method_definition", "interface_declaration", "lexical_declaration"},
+        ".tsx": {"function_declaration", "class_declaration", "method_definition", "interface_declaration", "lexical_declaration"},
         ".kt":  {"function_declaration", "class_declaration", "object_declaration"},
         ".kts": {"function_declaration", "class_declaration", "object_declaration"},
     }
@@ -70,6 +70,14 @@ def _sliding_window(lines: list, start: int, end: int, repo_name: str, rel: str,
             break
         i += step
     return chunks
+
+
+def _has_function_value(node, depth: int = 0) -> bool:
+    if node.type in ("arrow_function", "function_expression"):
+        return True
+    if depth >= 3:
+        return False
+    return any(_has_function_value(c, depth + 1) for c in node.children)
 
 
 def _collect_semantic_nodes(node, target_types: set, depth: int = 0, max_depth: int = 5) -> list:
@@ -101,6 +109,7 @@ def chunk_file(path: Path, repo_name: str) -> list:
             parser = _TSParser(_TS_LANGUAGES[ext])
             tree   = parser.parse(source)
             nodes  = _collect_semantic_nodes(tree.root_node, _TS_SEMANTIC[ext])
+            nodes  = [n for n in nodes if n.type != "lexical_declaration" or _has_function_value(n)]
             if nodes:
                 chunks = []
                 for node in nodes:
