@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelector, MatchValue, PointStruct, VectorParams
 
 REPOS_DIR      = Path(os.environ.get("REPOS_DIR", "/tmp/repos"))
 OLLAMA_URL     = os.environ.get("OLLAMA_URL", "http://ollama:11434")
@@ -192,6 +192,8 @@ def chunk_file(path: Path, repo_name: str) -> list:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default="", help="Only index this repo name (e.g. svelte-radio)")
+    parser.add_argument("--files", nargs="*", default=None, help="Incremental: re-index only these relative paths")
+    parser.add_argument("--remove-files", nargs="*", dest="remove_files", default=None, help="Incremental: delete these paths from Qdrant")
     args = parser.parse_args()
 
     all_repos = _load_repos()
@@ -224,11 +226,34 @@ def main():
             print(f"  SKIP {repo}: {e}")
             continue
 
-        code_files = [
-            p for p in repo_path.rglob("*")
-            if p.is_file() and p.suffix in CODE_EXTS
-            and not any(s in p.parts for s in SKIP_DIRS)
-        ]
+        incremental = args.files is not None or args.remove_files is not None
+        if incremental:
+            all_to_delete = list(set((args.files or []) + (args.remove_files or [])))
+            if all_to_delete:
+                print(f"  {name}: removing old chunks for {len(all_to_delete)} files")
+                for rel in all_to_delete:
+                    try:
+                        client.delete(
+                            COLLECTION,
+                            points_selector=FilterSelector(filter=Filter(must=[
+                                FieldCondition(key="repo", match=MatchValue(value=name)),
+                                FieldCondition(key="file", match=MatchValue(value=rel)),
+                            ]))
+                        )
+                    except Exception as e:
+                        print(f"  warn: delete {rel}: {e}")
+            code_files = [
+                repo_path / f for f in (args.files or [])
+                if (repo_path / f).exists() and Path(f).suffix in CODE_EXTS
+                and not any(s in Path(f).parts for s in SKIP_DIRS)
+            ]
+            print(f"  {name}: incremental — {len(code_files)} files to re-index, {len(args.remove_files or [])} removed")
+        else:
+            code_files = [
+                p for p in repo_path.rglob("*")
+                if p.is_file() and p.suffix in CODE_EXTS
+                and not any(s in p.parts for s in SKIP_DIRS)
+            ]
 
         total = 0
         file_point_ids: dict = {}

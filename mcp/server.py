@@ -5,6 +5,7 @@ import os
 import subprocess
 import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -334,8 +335,10 @@ def search_code(query: str, limit: int = 5) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-_reindex_lock = threading.Lock()
-_reindex_state: dict = {"running": False, "started_at": None, "output": [], "error": None, "done": False}
+_job_queue: deque = deque()
+_job_lock = threading.Lock()
+_worker_event = threading.Event()
+_reindex_state: dict = {"running": False, "started_at": None, "output": [], "error": None, "done": False, "queue_depth": 0}
 
 
 def _stream(cmd: list, label: str, timeout: int) -> None:
@@ -364,9 +367,10 @@ def _stream(cmd: list, label: str, timeout: int) -> None:
         log.info("[%s] done", label)
 
 
-def _run_reindex(notes: bool, code: bool, repo: str = "") -> None:
+def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=None) -> None:
     _reindex_state.update(running=True, started_at=time.time(), output=[], error=None, done=False)
-    log.info("reindex started (notes=%s code=%s repo=%s)", notes, code, repo or "all")
+    mode = "incremental" if files is not None else "full"
+    log.info("reindex started (notes=%s code=%s repo=%s mode=%s)", notes, code, repo or "all", mode)
     try:
         if notes:
             _stream(["/app/index.py"], "notes", 300)
@@ -374,6 +378,10 @@ def _run_reindex(notes: bool, code: bool, repo: str = "") -> None:
             cmd = ["/app/index_code.py"]
             if repo:
                 cmd += ["--repo", repo]
+            if files is not None:
+                cmd += ["--files"] + files
+            if removed:
+                cmd += ["--remove-files"] + removed
             _stream(cmd, "code", 600)
             _invalidate_graph_cache(repo)
             if repo:
@@ -390,6 +398,33 @@ def _run_reindex(notes: bool, code: bool, repo: str = "") -> None:
         log.info("reindex finished in %.0fs", elapsed)
 
 
+def _enqueue(notes: bool, code: bool, repo: str = "", files=None, removed=None) -> None:
+    with _job_lock:
+        if files is not None and code:
+            for job in _job_queue:
+                if job.get("code") and job.get("repo") == repo and job.get("files") is not None:
+                    job["files"] = list(set(job["files"] + files))
+                    job["removed"] = list(set(job.get("removed", []) + (removed or [])))
+                    log.info("[queue] merged %d files into queued job for %s", len(files), repo)
+                    return
+        _job_queue.append({"notes": notes, "code": code, "repo": repo, "files": files, "removed": removed or []})
+        _reindex_state["queue_depth"] = len(_job_queue)
+    _worker_event.set()
+
+
+def _reindex_worker() -> None:
+    while True:
+        _worker_event.wait()
+        _worker_event.clear()
+        while True:
+            with _job_lock:
+                if not _job_queue:
+                    break
+                job = _job_queue.popleft()
+                _reindex_state["queue_depth"] = len(_job_queue)
+            _run_reindex(job["notes"], job["code"], job.get("repo", ""), job.get("files"), job.get("removed", []))
+
+
 @mcp.tool()
 def reindex(notes: bool = True, code: bool = True, repo: str = "") -> str:
     """Trigger re-indexing of notes and/or source code into Qdrant.
@@ -403,22 +438,25 @@ def reindex(notes: bool = True, code: bool = True, repo: str = "") -> str:
     Set notes=False to only reindex code, or code=False for notes only.
     Set repo to a specific repo name (e.g. "svelte-radio") to only reindex that repo.
     """
-    with _reindex_lock:
-        if _reindex_state["running"]:
-            return "Reindex already in progress. Use reindex_status() to check."
-        threading.Thread(target=_run_reindex, args=(notes, code, repo), daemon=True).start()
-    return "Reindex started in background. Use reindex_status() to check progress."
+    _enqueue(notes, code, repo, files=None)
+    q = _reindex_state["queue_depth"]
+    return f"Reindex queued (position {q}). Use reindex_status() to check progress."
 
 
 @mcp.tool()
 def reindex_status() -> str:
     """Check whether a reindex is running or finished, and see its output log."""
     s = _reindex_state
+    q = s.get("queue_depth", 0)
     if s["started_at"] is None:
-        return "No reindex has been run yet."
+        idle = "No reindex has been run yet."
+        return idle + (f" {q} jobs queued." if q else "")
     elapsed = time.time() - s["started_at"]
     status = "running" if s["running"] else "done"
-    lines = [f"Status: {status} ({elapsed:.0f}s elapsed)"]
+    header = f"Status: {status} ({elapsed:.0f}s elapsed)"
+    if q:
+        header += f" — {q} more job(s) queued"
+    lines = [header]
     if s["output"]:
         lines.append("\n".join(s["output"]))
     if s["error"]:
@@ -572,12 +610,8 @@ class _NotesHandler(FileSystemEventHandler):
         self._timer.start()
 
     def _trigger(self):
-        with _reindex_lock:
-            if _reindex_state["running"]:
-                log.info("[watcher] reindex already running, skipping")
-                return
-            log.info("[watcher] debounce elapsed — triggering notes reindex")
-            threading.Thread(target=_run_reindex, args=(True, False, ""), daemon=True).start()
+        log.info("[watcher] debounce elapsed — queuing notes reindex")
+        _enqueue(notes=True, code=False)
 
 
 class _BearerTokenMiddleware:
@@ -627,21 +661,23 @@ async def webhook(request: Request) -> JSONResponse:
     if event != "push":
         return JSONResponse({"status": "ignored", "event": event})
     try:
-        repo = json.loads(body).get("repository", {}).get("name", "")
+        payload = json.loads(body)
+        repo = payload.get("repository", {}).get("name", "")
+        changed, removed = [], []
+        for commit in payload.get("commits", []):
+            changed += commit.get("added", []) + commit.get("modified", [])
+            removed += commit.get("removed", [])
+        removed = list(set(removed))
+        changed = list(set(changed) - set(removed))
     except Exception:
-        repo = ""
+        repo, changed, removed = "", [], []
     ts = datetime.now(timezone.utc).isoformat()
-    with _reindex_lock:
-        if _reindex_state["running"]:
-            _webhook_log.insert(0, {"repo": repo or "unknown", "ts": ts, "status": "skipped (already running)"})
-            _webhook_log[:] = _webhook_log[:50]
-            log.info("[webhook] push received but reindex already running")
-            return JSONResponse({"status": "reindex already running"})
-        _webhook_log.insert(0, {"repo": repo or "unknown", "ts": ts, "status": "triggered"})
-        _webhook_log[:] = _webhook_log[:50]
-        threading.Thread(target=_run_reindex, args=(False, True, repo), daemon=True).start()
-    log.info("[webhook] push on %s -> code reindex triggered", repo or "unknown")
-    return JSONResponse({"status": "ok", "repo": repo})
+    _enqueue(False, True, repo, files=changed or None, removed=removed)
+    status = "queued" if not _reindex_state["running"] else "queued (worker busy)"
+    _webhook_log.insert(0, {"repo": repo or "unknown", "ts": ts, "status": status, "files": len(changed)})
+    _webhook_log[:] = _webhook_log[:50]
+    log.info("[webhook] push on %s -> %d changed, %d removed -> %s", repo or "unknown", len(changed), len(removed), status)
+    return JSONResponse({"status": "ok", "repo": repo, "files_changed": len(changed)})
 
 
 def _start_watcher():
@@ -752,6 +788,7 @@ if __name__ == "__main__":
     threading.Thread(target=warmup, daemon=True).start()
     threading.Thread(target=_start_watcher, daemon=True).start()
     threading.Thread(target=_stats_saver, daemon=True).start()
+    threading.Thread(target=_reindex_worker, daemon=True).start()
     sse_app = mcp.sse_app()
     starlette_app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
