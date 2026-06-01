@@ -55,16 +55,38 @@ def search_notes(query: str, limit: int = 5) -> str:
         matched_scores.append(r.score)
     try:
         from graph import ppr_augment
-        extras = ppr_augment(matched_files, matched_scores, DATA_DIR / "graph_notes.json")
-        if extras:
-            _stats["ppr_fires"] += 1
-            _stats["ppr_results_added"] += len(extras)
-            ppr_lines = ["**Related via wikilinks (PPR):**"]
-            for e in extras:
-                ppr_lines.append(f"  -> {e['file']} (ppr: {e['ppr_score']})")
-            parts.append("\n".join(ppr_lines))
+        _ppr_import_ok = True
     except Exception:
-        pass
+        _ppr_import_ok = False
+
+    if not _ppr_import_ok:
+        _stats["ppr_nx_missing"] += 1
+    else:
+        try:
+            graph_path = DATA_DIR / "graph_notes.json"
+            if not graph_path.exists():
+                _stats["ppr_graph_missing"] += 1
+            else:
+                import json as _json
+                _nodes = {
+                    n["id"] if isinstance(n, dict) else n
+                    for n in _json.loads(graph_path.read_text()).get("nodes", [])
+                }
+                if not any(f in _nodes for f in matched_files):
+                    _stats["ppr_no_matches"] += 1
+                else:
+                    extras = ppr_augment(matched_files, matched_scores, graph_path)
+                    if extras:
+                        _stats["ppr_fires"] += 1
+                        _stats["ppr_results_added"] += len(extras)
+                        ppr_lines = ["**Related via wikilinks (PPR):**"]
+                        for e in extras:
+                            ppr_lines.append(f"  -> {e['file']} (ppr: {e['ppr_score']})")
+                        parts.append("\n".join(ppr_lines))
+                    else:
+                        _stats["ppr_below_threshold"] += 1
+        except Exception:
+            pass
     return "\n\n---\n\n".join(parts)
 
 
@@ -206,6 +228,14 @@ def _fmt_version_stats(v: str, g: dict, current: bool = False) -> str:
         f"  results: code={g.get('total_results_code', 0)} notes={g.get('total_results_notes', 0)}  avg/search={avg_results}",
         f"  centrality lift avg: {avg_lift} (across {g.get('centrality_lift_count', 0)} results)",
         f"  PPR: {g.get('ppr_fires', 0)} fires ({ppr_rate} of note searches) · +{g.get('ppr_results_added', 0)} results · avg {avg_ppr}/fire",
+    ]
+    _ppr_diag = {k: g.get(k, 0) for k in ("ppr_nx_missing", "ppr_graph_missing", "ppr_no_matches", "ppr_below_threshold")}
+    if any(_ppr_diag.values()):
+        lines.append(
+            f"  PPR misses: nx={_ppr_diag['ppr_nx_missing']} graph={_ppr_diag['ppr_graph_missing']}"
+            f" no_match={_ppr_diag['ppr_no_matches']} below_threshold={_ppr_diag['ppr_below_threshold']}"
+        )
+    lines += [
         f"  graph cache: {cache_rate} ({g.get('graph_cache_hits', 0)}/{total_cache})",
         f"  reindexes: {g.get('reindex_count', 0)}",
     ]

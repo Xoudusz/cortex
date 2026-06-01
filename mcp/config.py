@@ -125,6 +125,10 @@ def _default_stats() -> dict:
         "reindex_count": 0,
         "total_results_code": 0,
         "total_results_notes": 0,
+        "ppr_nx_missing": 0,
+        "ppr_graph_missing": 0,
+        "ppr_no_matches": 0,
+        "ppr_below_threshold": 0,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
