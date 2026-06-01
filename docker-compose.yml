@@ -26,7 +26,8 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - QDRANT_URL=http://qdrant:6333
       - NOTES_PATH=/notes
-      - API_KEY=${API_KEY:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - BASE_URL=${BASE_URL:-https://cortex.hyvitech.org}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
       - REPOS_CONFIG=/app/data/repos.json

@@ -23,6 +23,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from web_ui import ui, api_search, api_status, api_reindex, api_stats
+import oauth as _oauth
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,7 +40,8 @@ PORT            = int(os.environ.get("MCP_PORT", "8765"))
 NOTES_PATH      = os.environ.get("NOTES_PATH", "/notes")
 WATCH_DEBOUNCE  = int(os.environ.get("WATCH_DEBOUNCE", "60"))
 WEBHOOK_SECRET  = os.environ.get("WEBHOOK_SECRET", "")
-API_KEY         = os.environ.get("API_KEY", "")
+ADMIN_PASSWORD  = os.environ.get("ADMIN_PASSWORD", "")
+BASE_URL        = os.environ.get("BASE_URL", "http://localhost:8765").rstrip("/")
 GITHUB_TOKEN    = os.environ.get("GITHUB_TOKEN", "")
 REPOS_CONFIG    = os.environ.get("REPOS_CONFIG", "/app/data/repos.json")
 DATA_DIR        = Path(REPOS_CONFIG).parent
@@ -178,9 +180,9 @@ ONBOARDING_TEMPLATE = '''# Cortex Onboarding
 
 ## MCP Setup (if not connected)
 ```bash
-claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse \\
-  --header "x-api-key: <get-from-user>"
+claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse
 ```
+OAuth login will open in browser on first connection.
 
 ## Cortex Tools
 Use PROACTIVELY — search before asking user for context.
@@ -578,24 +580,28 @@ class _NotesHandler(FileSystemEventHandler):
             threading.Thread(target=_run_reindex, args=(True, False, ""), daemon=True).start()
 
 
-class _APIKeyMiddleware:
+class _BearerTokenMiddleware:
+    _UNPROTECTED = frozenset({"/health", "/webhook", "/register", "/authorize", "/token", "/"})
+
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and API_KEY:
+        if scope["type"] == "http" and ADMIN_PASSWORD:
             path = scope.get("path", "")
-            unprotected = (
-                path in {"/health", "/webhook", "/register", "/"}
-                or "/.well-known" in path
-                or path.startswith("/api/")
-            )
+            unprotected = path in self._UNPROTECTED or path.startswith("/.well-known")
             if not unprotected:
                 headers = {k: v for k, v in scope.get("headers", [])}
-                key = headers.get(b"x-api-key", b"").decode()
-                if key != API_KEY:
-                    log.warning("[auth] rejected %s — missing or invalid X-API-Key", path)
-                    response = JSONResponse({"error": "Unauthorized"}, status_code=401)
+                auth = headers.get(b"authorization", b"").decode()
+                token = auth[7:] if auth.startswith("Bearer ") else ""
+                if not _oauth.verify_token(token):
+                    log.warning("[auth] rejected %s — missing or invalid Bearer token", path)
+                    resource_meta = BASE_URL + "/.well-known/oauth-protected-resource"
+                    response = JSONResponse(
+                        {"error": "unauthorized"},
+                        status_code=401,
+                        headers={"WWW-Authenticate": f'Bearer resource_metadata="{resource_meta}"'},
+                    )
                     await response(scope, receive, send)
                     return
         await self.app(scope, receive, send)
@@ -603,10 +609,6 @@ class _APIKeyMiddleware:
 
 async def health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
-
-
-async def oauth_not_found(request: Request) -> JSONResponse:
-    return JSONResponse({"error": "not_found", "error_description": "OAuth not supported"}, status_code=404)
 
 
 async def webhook(request: Request) -> JSONResponse:
@@ -761,10 +763,13 @@ if __name__ == "__main__":
         Route("/api/github/repos", _api_github_repos, methods=["GET"]),
         Route("/api/webhook-log", _api_webhook_log_handler, methods=["GET"]),
         Route("/api/graph/{repo:path}", _api_graph_handler, methods=["GET"]),
-        Route("/.well-known/oauth-authorization-server", oauth_not_found),
-        Route("/.well-known/openid-configuration", oauth_not_found),
-        Route("/register", oauth_not_found, methods=["POST"]),
+        Route("/.well-known/oauth-authorization-server", _oauth.well_known_as),
+        Route("/.well-known/oauth-protected-resource", _oauth.well_known_resource),
+        Route("/register", _oauth.register, methods=["POST"]),
+        Route("/authorize", _oauth.authorize_get, methods=["GET"]),
+        Route("/authorize", _oauth.authorize_post, methods=["POST"]),
+        Route("/token", _oauth.token_endpoint, methods=["POST"]),
         Mount("/sse", app=sse_app),
     ])
-    app = _NormalizeSSEPath(_APIKeyMiddleware(starlette_app))
+    app = _NormalizeSSEPath(_BearerTokenMiddleware(starlette_app))
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")

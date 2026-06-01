@@ -228,8 +228,71 @@ _UI_TEMPLATE = """<!DOCTYPE html>
     <script>
         const NL = String.fromCharCode(10);
 
+        function getToken() { return localStorage.getItem('cortex_token') || ''; }
+
+        function generateVerifier() {
+            const arr = new Uint8Array(32);
+            crypto.getRandomValues(arr);
+            return btoa(String.fromCharCode(...arr)).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');
+        }
+
+        function startOAuthFlow() {
+            const verifier = generateVerifier();
+            sessionStorage.setItem('cortex_pkce_verifier', verifier);
+            crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)).then(hash => {
+                const challenge = btoa(String.fromCharCode(...new Uint8Array(hash)))
+                    .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');
+                const redirectUri = window.location.origin + '/';
+                const params = new URLSearchParams({
+                    response_type: 'code',
+                    client_id: 'cortex-web-ui',
+                    redirect_uri: redirectUri,
+                    code_challenge: challenge,
+                    code_challenge_method: 'S256',
+                });
+                window.location.href = '/authorize?' + params.toString();
+            });
+        }
+
+        (async function initAuth() {
+            const params = new URLSearchParams(window.location.search);
+            const code = params.get('code');
+            if (code) {
+                const verifier = sessionStorage.getItem('cortex_pkce_verifier');
+                if (verifier) {
+                    try {
+                        const res = await fetch('/token', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: new URLSearchParams({
+                                grant_type: 'authorization_code',
+                                code,
+                                code_verifier: verifier,
+                                client_id: 'cortex-web-ui',
+                                redirect_uri: window.location.origin + '/',
+                            }),
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            localStorage.setItem('cortex_token', data.access_token);
+                            if (data.refresh_token) localStorage.setItem('cortex_refresh', data.refresh_token);
+                            sessionStorage.removeItem('cortex_pkce_verifier');
+                        }
+                    } catch (_) {}
+                }
+                history.replaceState({}, '', '/');
+                window.location.reload();
+                return;
+            }
+            if (!getToken()) startOAuthFlow();
+        })();
+
         async function api(path, options = {}) {
-            const res = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers } });
+            const token = getToken();
+            const headers = { 'Content-Type': 'application/json', ...options.headers };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            const res = await fetch(path, { ...options, headers });
+            if (res.status === 401) { localStorage.removeItem('cortex_token'); startOAuthFlow(); return; }
             if (!res.ok) { const err = await res.json().catch(() => ({ error: res.statusText })); throw new Error(err.error || res.statusText); }
             return res.json();
         }
