@@ -102,9 +102,12 @@ def main():
     client = QdrantClient(url=QDRANT_URL)
     existing = [c.name for c in client.get_collections().collections]
     if COLLECTION not in existing:
-        client.create_collection(COLLECTION,
-            vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE))
-        print(f"Created collection '{COLLECTION}'")
+        client.create_collection(
+            COLLECTION,
+            vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+            sparse_vectors_config={"sparse": SparseVectorParams()},
+        )
+        print(f"Created collection '{COLLECTION}' with sparse vector support")
 
     coll_info = client.get_collection(COLLECTION)
     cache_override = False
@@ -112,12 +115,19 @@ def main():
     try:
         has_sparse = bool(getattr(coll_info.config.params, 'sparse_vectors_config', None))
         if not has_sparse:
-            client.update_collection(COLLECTION, sparse_vectors_config={"sparse": SparseVectorParams()})
+            # update_collection can't add new sparse config — must recreate
+            print("  Recreating 'notes' collection with sparse vector support (one-time migration)...", flush=True)
+            client.delete_collection(COLLECTION)
+            client.create_collection(
+                COLLECTION,
+                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+                sparse_vectors_config={"sparse": SparseVectorParams()},
+            )
             cache_override = True
-            print("  Added sparse vector config to 'notes' — forcing full re-embed for migration", flush=True)
+            print("  Collection recreated — forcing full re-embed", flush=True)
         sparse_available = True
     except Exception as e:
-        print(f"  warn: sparse vectors unavailable: {e}", flush=True)
+        print(f"  warn: sparse migration failed: {e}", flush=True)
 
     md_files = [p for p in NOTES_DIR.rglob("*.md")
                 if ".obsidian" not in p.parts and ".git" not in p.parts]

@@ -124,8 +124,9 @@ def main():
         client.create_collection(
             COLLECTION,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+            sparse_vectors_config={"sparse": SparseVectorParams()},
         )
-        print(f"Created collection '{COLLECTION}'", flush=True)
+        print(f"Created collection '{COLLECTION}' with sparse vector support", flush=True)
 
     coll_info = client.get_collection(COLLECTION)
     sparse_migration = False
@@ -133,12 +134,19 @@ def main():
     try:
         has_sparse = bool(getattr(coll_info.config.params, 'sparse_vectors_config', None))
         if not has_sparse:
-            client.update_collection(COLLECTION, sparse_vectors_config={"sparse": SparseVectorParams()})
+            # update_collection can't add new sparse config — must recreate
+            print(f"  Recreating '{COLLECTION}' collection with sparse vector support (one-time migration)...", flush=True)
+            client.delete_collection(COLLECTION)
+            client.create_collection(
+                COLLECTION,
+                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+                sparse_vectors_config={"sparse": SparseVectorParams()},
+            )
             sparse_migration = True
-            print(f"  Added sparse vector config to '{COLLECTION}' — forcing full re-embed for migration", flush=True)
+            print(f"  Collection recreated — forcing full re-embed", flush=True)
         sparse_available = True
     except Exception as e:
-        print(f"  warn: sparse vectors unavailable: {e}", flush=True)
+        print(f"  warn: sparse migration failed: {e}", flush=True)
 
     from chunker import _TS_AVAILABLE
     print(f"Chunking mode: {'tree-sitter' if _TS_AVAILABLE else 'sliding-window (fallback)'}", flush=True)
