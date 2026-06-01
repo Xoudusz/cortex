@@ -68,7 +68,7 @@ async def webhook(request: Request) -> JSONResponse:
     log_entry = {"repo": repo or "unknown", "ts": ts, "status": "queued", "files": len(changed)}
     _webhook_log.insert(0, log_entry)
     _webhook_log[:] = _webhook_log[:50]
-    status = _enqueue(False, True, repo, files=changed or None, removed=removed, _log_entry=log_entry)
+    status = _enqueue(False, True, repo, files=changed if (changed or removed) else None, removed=removed, _log_entry=log_entry)
     log_entry["status"] = status
     log.info("[webhook] push on %s -> %d changed, %d removed -> %s", repo or "unknown", len(changed), len(removed), status)
     return JSONResponse({"status": "ok", "repo": repo, "files_changed": len(changed)})
