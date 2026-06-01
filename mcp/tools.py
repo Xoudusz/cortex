@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+"""FastMCP instance and all MCP tools/prompts for cortex."""
+
+import logging
+import time
+
+from mcp.server.fastmcp import FastMCP
+from qdrant_client import QdrantClient
+
+from config import (
+    HOST, PORT, QDRANT_URL, DATA_DIR, VERSION,
+    ONBOARDING_TEMPLATE, _merge_onboarding,
+    _stats, embed, _get_code_graph_meta,
+)
+from reindex import _enqueue, _reindex_state, _job_queue
+
+log = logging.getLogger("cortex")
+
+mcp = FastMCP("cortex", host=HOST, port=PORT)
+
+
+@mcp.tool()
+def search_notes(query: str, limit: int = 5) -> str:
+    """Search the user's personal Obsidian knowledge base semantically.
+
+    Call this proactively whenever the user asks about:
+    - Their projects, plans, ideas, or roadmap items
+    - Personal context, goals, or decisions they may have documented
+    - How something in their setup works (server config, tools, workflows)
+    - Anything that sounds like it could be in personal notes
+
+    Returns matching note sections with file path, heading, score, and tags.
+    PPR over wikilinks surfaces related notes beyond direct vector matches.
+    Prefer this over asking the user to explain context they may have already written down.
+    """
+    _stats["search_notes_calls"] += 1
+    client = QdrantClient(url=QDRANT_URL)
+    vector = embed(query)
+    results = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
+    if not results:
+        return "No results found."
+    parts = []
+    matched_files = []
+    matched_scores = []
+    for r in results:
+        p = r.payload
+        tags = p.get("tags", [])
+        tag_str = f" `{'`, `'.join(tags)}`" if tags else ""
+        parts.append(
+            f"**{p['file']} > {p['heading']}** (score: {round(r.score, 3)}){tag_str}\n\n{p['text']}"
+        )
+        matched_files.append(p.get("file", ""))
+        matched_scores.append(r.score)
+    try:
+        from graph import ppr_augment
+        extras = ppr_augment(matched_files, matched_scores, DATA_DIR / "graph_notes.json")
+        if extras:
+            _stats["ppr_fires"] += 1
+            _stats["ppr_results_added"] += len(extras)
+            ppr_lines = ["**Related via wikilinks (PPR):**"]
+            for e in extras:
+                ppr_lines.append(f"  -> {e['file']} (ppr: {e['ppr_score']})")
+            parts.append("\n".join(ppr_lines))
+    except Exception:
+        pass
+    return "\n\n---\n\n".join(parts)
+
+
+@mcp.tool()
+def search_code(query: str, limit: int = 5) -> str:
+    """Search source code across the user's active repos semantically.
+
+    Indexed repos: weakness-dex, mtgdle, tower-of-evolon, tower-of-evolon-backend, svelte-radio, cortex, riftracoons.
+
+    Call this proactively whenever:
+    - Implementing a feature that touches one of these repos
+    - Looking for where something is defined or how a pattern is used
+    - Debugging — find related code before suggesting a fix
+    - The user asks "how does X work" about one of their projects
+    - Writing code that should match existing conventions in the repo
+
+    Results are re-ranked by centrality (highly-imported files score higher).
+    Returns code chunks with file path, line numbers, language, score, centrality, community, and GitHub link.
+    Always search before writing code for these repos — don't guess at existing patterns.
+    """
+    _stats["search_code_calls"] += 1
+    client = QdrantClient(url=QDRANT_URL)
+    vector = embed(query)
+    fetch_limit = min(limit * 3, 50)
+    results = client.query_points("code", query=vector, limit=fetch_limit, with_payload=True).points
+    if not results:
+        return "No results found."
+    scored = []
+    for r in results:
+        p = r.payload
+        file_meta = _get_code_graph_meta(p.get("repo", "")).get(p.get("file", ""), {})
+        centrality = file_meta.get("centrality", 0.0)
+        boosted = r.score * (1.0 + 0.2 * centrality)
+        if centrality > 0:
+            _stats["centrality_lift_total"] += round(boosted - r.score, 4)
+            _stats["centrality_lift_count"] += 1
+        scored.append((boosted, r, file_meta))
+    scored.sort(key=lambda x: -x[0])
+    seen_files: set = set()
+    deduped = []
+    for item in scored:
+        key = f"{item[1].payload.get('repo', '')}/{item[1].payload.get('file', '')}"
+        if key not in seen_files:
+            seen_files.add(key)
+            deduped.append(item)
+        if len(deduped) >= limit:
+            break
+    parts = []
+    for boosted_score, r, file_meta in deduped:
+        p = r.payload
+        centrality = file_meta.get("centrality")
+        community = file_meta.get("community_id")
+        header = (
+            f"**{p['repo']}/{p['file']}** "
+            f"lines {p['start_line']}-{p['end_line']} "
+            f"({p.get('language', '')}) — score: {round(boosted_score, 3)}"
+        )
+        if centrality is not None:
+            header += f" · centrality: {centrality}"
+        if community is not None:
+            header += f" · community: {community}"
+        url = p.get("github_url", "")
+        parts.append(f"{header}\n{url}\n\n{p['text']}" if url else f"{header}\n\n{p['text']}")
+    return "\n\n---\n\n".join(parts)
+
+
+@mcp.tool()
+def reindex(notes: bool = True, code: bool = True, repo: str = "") -> str:
+    """Trigger re-indexing of notes and/or source code into Qdrant.
+
+    Use when:
+    - search_notes or search_code returns stale or missing results
+    - The user says they updated their notes or pushed new code
+    - Starting a session after a long gap (index may be outdated)
+
+    Runs async — returns immediately. Call reindex_status() to check progress.
+    Set notes=False to only reindex code, or code=False for notes only.
+    Set repo to a specific repo name (e.g. "svelte-radio") to only reindex that repo.
+    """
+    _enqueue(notes, code, repo, files=None)
+    q = _reindex_state["queue_depth"]
+    return f"Reindex queued (position {q}). Use reindex_status() to check progress."
+
+
+@mcp.tool()
+def reindex_status() -> str:
+    """Check whether a reindex is running or finished, and see its output log."""
+    s = _reindex_state
+    q = s.get("queue_depth", 0)
+    if s["started_at"] is None:
+        idle = "No reindex has been run yet."
+        return idle + (f" {q} jobs queued." if q else "")
+    elapsed = time.time() - s["started_at"]
+    status = "running" if s["running"] else "done"
+    header = f"Status: {status} ({elapsed:.0f}s elapsed)"
+    if q:
+        header += f" — {q} more job(s) queued"
+    lines = [header]
+    if s["output"]:
+        lines.append("\n".join(s["output"]))
+    if s["error"]:
+        lines.append(f"Error: {s['error']}")
+    return "\n\n".join(lines)
+
+
+@mcp.tool()
+def get_stats() -> str:
+    """Return current cortex efficiency metrics — search call counts, centrality lift, PPR rate, cache hit rate, queue depth."""
+    g = _stats
+    avg_lift = round(g["centrality_lift_total"] / g["centrality_lift_count"], 4) if g["centrality_lift_count"] > 0 else 0
+    ppr_rate = f"{g['ppr_fires'] / g['search_notes_calls'] * 100:.1f}%" if g["search_notes_calls"] > 0 else "—"
+    total_cache = g["graph_cache_hits"] + g["graph_cache_misses"]
+    cache_rate = f"{g['graph_cache_hits'] / total_cache * 100:.1f}%" if total_cache > 0 else "—"
+    return "\n".join([
+        f"version: {VERSION}",
+        f"search_code calls: {g['search_code_calls']}",
+        f"centrality lift avg: {avg_lift} (across {g['centrality_lift_count']} results)",
+        f"search_notes calls: {g['search_notes_calls']}",
+        f"PPR fires: {g['ppr_fires']} ({ppr_rate} of calls)",
+        f"PPR results added: {g['ppr_results_added']}",
+        f"graph cache hit rate: {cache_rate} ({g['graph_cache_hits']}/{total_cache})",
+        f"reindex queue depth: {_reindex_state.get('queue_depth', 0)}",
+    ])
+
+
+@mcp.tool()
+def get_neighbors(file: str, repo: str) -> str:
+    """Show what a code file imports and what imports it (direct graph neighbors).
+
+    Use when you want to explore structural connections around a file you found.
+    Example: get_neighbors("mcp/server.py", "cortex")
+
+    Requires graph data — run reindex first if empty.
+    """
+    meta = _get_code_graph_meta(repo)
+    if not meta:
+        return f"No graph data for '{repo}'. Run reindex(code=True, repo='{repo}') first."
+    file_meta = meta.get(file)
+    if file_meta is None:
+        matches = [f for f in meta if file in f]
+        if not matches:
+            return f"File '{file}' not found in graph for '{repo}'."
+        file = matches[0]
+        file_meta = meta[file]
+    imports = file_meta.get("imports", [])
+    imported_by = file_meta.get("imported_by", [])
+    lines = [
+        f"**{file}**",
+        f"centrality: {file_meta.get('centrality', 0)} · community: {file_meta.get('community_id', '?')}",
+    ]
+    if imports:
+        lines.append(f"\nimports ({len(imports)}):")
+        lines.extend(f"  -> {f}" for f in imports)
+    if imported_by:
+        lines.append(f"\nimported by ({len(imported_by)}):")
+        lines.extend(f"  <- {f}" for f in imported_by)
+    if not imports and not imported_by:
+        lines.append("\nNo connections found (isolated file).")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_community(repo: str, community_id: int) -> str:
+    """List all files in the same structural community/cluster for a repo.
+
+    Use when you want to find everything structurally related to a file.
+    Tip: run search_code first to find a community_id, then call this.
+    Example: get_community("cortex", 0)
+
+    Requires graph data — run reindex first if empty.
+    """
+    meta = _get_code_graph_meta(repo)
+    if not meta:
+        return f"No graph data for '{repo}'. Run reindex(code=True, repo='{repo}') first."
+    members = [
+        (f, m.get("centrality", 0))
+        for f, m in meta.items()
+        if m.get("community_id") == community_id
+    ]
+    if not members:
+        return f"Community {community_id} not found in '{repo}'."
+    members.sort(key=lambda x: -x[1])
+    lines = [f"**Community {community_id}** in '{repo}' — {len(members)} files:"]
+    for f, centrality in members:
+        star = "*" if centrality > 0.1 else " "
+        lines.append(f"  {star} {f} (centrality: {centrality})")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_onboarding(existing_content: str = "") -> str:
+    """Get onboarding instructions for CLAUDE.md."""
+    if existing_content.strip():
+        return _merge_onboarding(existing_content)
+    return ONBOARDING_TEMPLATE
+
+
+@mcp.prompt()
+def onboarding() -> str:
+    """Set up Cortex and user preferences for this project."""
+    return f"""Set up Cortex for this project. Execute this checklist:
+
+## 1. CLAUDE.md
+Read existing CLAUDE.md (if any). Merge with this config, avoiding duplicates:
+
+{ONBOARDING_TEMPLATE}
+
+Write merged result to CLAUDE.md.
+
+## 2. Git Config
+```bash
+rtk git config user.name "Xoudusz" && rtk git config user.email "da@w23.at"
+```
+
+## 3. Check RTK
+Run `rtk --version`. If fails: `cargo install rtk`
+
+## 4. Check Caveman Skill
+Run `claude skill list`. If missing: `claude skill add caveman:caveman`
+
+## 5. Verify Cortex
+Call `search_notes("test query")`. Report status of each step when done."""

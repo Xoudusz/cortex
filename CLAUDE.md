@@ -34,19 +34,29 @@ Auth handled by Authelia at NPM proxy level. No in-app auth required.
 **Unprotected endpoints:**
 - `GET /health` — healthchecks
 - `POST /webhook` — GitHub webhooks (HMAC auth)
-- `/sse` — MCP SSE (X-API-Key header)
+- `/sse` — MCP SSE (OAuth (Bearer))
 
 ## Structure
 
 ```
 mcp/
-  server.py         # FastMCP SSE server — all tools + webhook + watcher
-  web_ui.py         # Web dashboard HTML + API routes
+  server.py     # HTTP routes, middleware, watcher, __main__
+  config.py     # env vars, shared state, repos/graph/stats utils, embed
+  reindex.py    # job queue, _stream, _run_reindex, _enqueue, _reindex_worker
+  tools.py      # FastMCP instance + all @mcp.tool() + @mcp.prompt()
+  web_ui.py     # API handlers — search, status, stats
+  template.py   # embedded HTML/CSS/JS dashboard + LOGO_SVG
+  oauth.py      # custom OAuth 2.0 AS (RFC 8414/7591/7636, PKCE S256)
   requirements.txt
-  Dockerfile        # build context is repo root (copies indexer/ scripts in)
+  Dockerfile    # build context is repo root
 indexer/
   index.py          # Notes indexer — heading-chunked, tags, modified_at
-  index_code.py     # Code indexer — 30-line sliding window, github_url
+  index_code.py     # Code indexer — clone/pull, embed, upsert
+  chunker.py        # tree-sitter semantic chunking + sliding-window fallback
+  graph.py          # facade — re-exports from code_graph, notes_graph, global_graph
+  code_graph.py     # import/call/inheritance edges, centrality, Louvain
+  notes_graph.py    # Obsidian wikilink graph + PPR augmentation
+  global_graph.py   # cross-repo edges from root config files
 docker-compose.yml  # ollama + qdrant + cortex-mcp
 ```
 
@@ -56,6 +66,7 @@ docker-compose.yml  # ollama + qdrant + cortex-mcp
 - `search_code(query, limit)` — semantic search over source code
 - `reindex(notes, code, repo)` — async, returns immediately
 - `reindex_status()` — check progress of last reindex
+- `get_stats()` — returns efficiency metrics
 - `get_onboarding(existing_content?)` — returns setup instructions + preferences; pass existing CLAUDE.md content to merge
 
 ## MCP prompts
@@ -64,11 +75,15 @@ docker-compose.yml  # ollama + qdrant + cortex-mcp
 
 ## Key patterns
 
-- `mcp.sse_app()` returns Starlette app — mounted with `/webhook` route for GitHub push events
-- `_reindex_lock` prevents concurrent reindexes
+- Import chain (no circular deps): `config` ← `reindex` ← `tools` ← `server`
+- `mcp.sse_app()` returns Starlette app — mounted at `/sse` in server.py
+- `_job_queue` (deque) + `_reindex_worker` thread processes jobs sequentially — webhooks/watcher/MCP tool all call `_enqueue()`, nothing dropped
+- `_enqueue()` coalesces same-repo incremental webhook jobs (merges file lists instead of queuing duplicate)
 - Watchdog debounces 60s before triggering notes reindex (env: `WATCH_DEBOUNCE`)
 - Code indexer clones repos via `GITHUB_TOKEN` env var — required for private repos
 - Qdrant `query_points()` API (v1.17+) — `search()` is removed
+- CORS middleware wraps entire app — required for Claude Code CLI OAuth flow
+- `CORSMiddleware` is outermost layer so OPTIONS preflight bypasses `_BearerTokenMiddleware`
 
 ## Env vars
 
@@ -80,6 +95,8 @@ docker-compose.yml  # ollama + qdrant + cortex-mcp
 | `WATCH_DEBOUNCE` | `60` | Seconds to debounce watcher |
 | `GITHUB_TOKEN` | — | For cloning private repos |
 | `WEBHOOK_SECRET` | — | GitHub webhook signature secret |
+| `ADMIN_PASSWORD` | — | OAuth login password (required if auth enabled) |
+| `BASE_URL` | `http://localhost:8765` | Public URL for OAuth metadata |
 
 ## After changes
 
