@@ -9,7 +9,8 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 
-from config import _invalidate_graph_cache, _load_repos, _reindex_log, _update_indexed_at, _stats
+from state import _invalidate_graph_cache, _reindex_log, _stats
+from repos import _load_repos, _update_indexed_at
 
 log = logging.getLogger("cortex")
 
@@ -23,6 +24,7 @@ _reindex_state: dict = {
 
 
 def _stream(cmd: list, label: str, timeout: int) -> None:
+    """Run cmd as a subprocess, streaming each output line into the reindex log."""
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     try:
@@ -35,6 +37,11 @@ def _stream(cmd: list, label: str, timeout: int) -> None:
 
 
 def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=None) -> None:
+    """Execute a reindex job synchronously, updating _reindex_state throughout.
+
+    Runs /app/index.py for notes and /app/index_code.py for code.
+    Increments _stats["reindex_count"] on completion regardless of errors.
+    """
     mode = "incremental" if files is not None else "full"
     _reindex_state.update(
         running=True, started_at=time.time(), finished_at=None,
@@ -72,6 +79,12 @@ def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=No
 
 
 def _enqueue(notes: bool, code: bool, repo: str = "", files=None, removed=None, _log_entry=None) -> str:
+    """Add a reindex job to the queue and signal the worker.
+
+    Coalesces incremental code jobs for the same repo: if a matching queued job
+    already exists, the file lists are merged instead of adding a duplicate entry.
+    Returns 'merged' if coalesced, 'triggered' otherwise.
+    """
     with _job_lock:
         if files is not None and code:
             for job in _job_queue:
@@ -87,6 +100,7 @@ def _enqueue(notes: bool, code: bool, repo: str = "", files=None, removed=None, 
 
 
 def _reindex_worker() -> None:
+    """Background thread: drain the job queue, running one reindex at a time."""
     while True:
         _worker_event.wait()
         _worker_event.clear()

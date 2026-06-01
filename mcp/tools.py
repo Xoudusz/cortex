@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """FastMCP instance and all MCP tools/prompts for cortex."""
 
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -8,16 +9,49 @@ from datetime import datetime, timezone
 from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
 
-from config import (
-    HOST, PORT, QDRANT_URL, DATA_DIR, VERSION,
-    ONBOARDING_TEMPLATE, _merge_onboarding,
-    _stats, embed, _get_code_graph_meta, _load_all_stats,
-)
-from reindex import _enqueue, _reindex_state, _job_queue
+from config import HOST, PORT, QDRANT_URL, DATA_DIR, VERSION, embed
+from state import _stats, _get_code_graph_meta, _load_all_stats
+from onboarding import ONBOARDING_TEMPLATE, _merge_onboarding
+from reindex import _enqueue, _reindex_state
 
 log = logging.getLogger("cortex")
 
 mcp = FastMCP("cortex", host=HOST, port=PORT)
+
+
+def _augment_with_ppr(matched_files: list, matched_scores: list, graph_path) -> str | None:
+    """Run PPR over wikilinks; return formatted extra block or None. Updates _stats counters."""
+    try:
+        from graph import ppr_augment
+    except Exception:
+        _stats["ppr_nx_missing"] += 1
+        return None
+    try:
+        if not graph_path.exists():
+            _stats["ppr_graph_missing"] += 1
+            return None
+        nodes = {
+            n["id"] if isinstance(n, dict) else n
+            for n in json.loads(graph_path.read_text()).get("nodes", [])
+        }
+        if not any(f in nodes for f in matched_files):
+            _stats["ppr_no_matches"] += 1
+            return None
+        extras, reason = ppr_augment(matched_files, matched_scores, graph_path, _return_reason=True)
+        if extras:
+            _stats["ppr_fires"] += 1
+            _stats["ppr_results_added"] += len(extras)
+            lines = ["**Related via wikilinks (PPR):**"]
+            for e in extras:
+                lines.append(f"  -> {e['file']} (ppr: {e['ppr_score']})")
+            return "\n".join(lines)
+        if reason == "exception":
+            _stats["ppr_exception"] += 1
+        else:
+            _stats["ppr_below_threshold"] += 1
+    except Exception:
+        pass
+    return None
 
 
 @mcp.tool()
@@ -53,42 +87,9 @@ def search_notes(query: str, limit: int = 5) -> str:
         )
         matched_files.append(p.get("file", ""))
         matched_scores.append(r.score)
-    try:
-        from graph import ppr_augment
-        _ppr_import_ok = True
-    except Exception:
-        _ppr_import_ok = False
-
-    if not _ppr_import_ok:
-        _stats["ppr_nx_missing"] += 1
-    else:
-        try:
-            graph_path = DATA_DIR / "graph_notes.json"
-            if not graph_path.exists():
-                _stats["ppr_graph_missing"] += 1
-            else:
-                import json as _json
-                _nodes = {
-                    n["id"] if isinstance(n, dict) else n
-                    for n in _json.loads(graph_path.read_text()).get("nodes", [])
-                }
-                if not any(f in _nodes for f in matched_files):
-                    _stats["ppr_no_matches"] += 1
-                else:
-                    extras, reason = ppr_augment(matched_files, matched_scores, graph_path, _return_reason=True)
-                    if extras:
-                        _stats["ppr_fires"] += 1
-                        _stats["ppr_results_added"] += len(extras)
-                        ppr_lines = ["**Related via wikilinks (PPR):**"]
-                        for e in extras:
-                            ppr_lines.append(f"  -> {e['file']} (ppr: {e['ppr_score']})")
-                        parts.append("\n".join(ppr_lines))
-                    elif reason == "exception":
-                        _stats["ppr_exception"] += 1
-                    else:
-                        _stats["ppr_below_threshold"] += 1
-        except Exception:
-            pass
+    ppr_block = _augment_with_ppr(matched_files, matched_scores, DATA_DIR / "graph_notes.json")
+    if ppr_block:
+        parts.append(ppr_block)
     return "\n\n---\n\n".join(parts)
 
 
@@ -195,21 +196,22 @@ def reindex_status() -> str:
     return "\n\n".join(lines)
 
 
-def _fmt_version_stats(v: str, g: dict, current: bool = False) -> str:
-    total_searches = g.get("search_code_calls", 0) + g.get("search_notes_calls", 0)
-    ppr_rate = f"{g['ppr_fires'] / g['search_notes_calls'] * 100:.1f}%" if g.get("search_notes_calls", 0) > 0 else "—"
-    avg_ppr = round(g["ppr_results_added"] / g["ppr_fires"], 1) if g.get("ppr_fires", 0) > 0 else "—"
-    total_cache = g.get("graph_cache_hits", 0) + g.get("graph_cache_misses", 0)
-    cache_rate = f"{g['graph_cache_hits'] / total_cache * 100:.1f}%" if total_cache > 0 else "—"
-    avg_lift = round(g["centrality_lift_total"] / g["centrality_lift_count"], 4) if g.get("centrality_lift_count", 0) > 0 else 0
-    total_results = g.get("total_results_code", 0) + g.get("total_results_notes", 0)
+def _fmt_version_stats(v: str, stats: dict, current: bool = False) -> str:
+    """Format per-version stats block for display."""
+    total_searches = stats.get("search_code_calls", 0) + stats.get("search_notes_calls", 0)
+    ppr_rate = f"{stats['ppr_fires'] / stats['search_notes_calls'] * 100:.1f}%" if stats.get("search_notes_calls", 0) > 0 else "—"
+    avg_ppr = round(stats["ppr_results_added"] / stats["ppr_fires"], 1) if stats.get("ppr_fires", 0) > 0 else "—"
+    total_cache = stats.get("graph_cache_hits", 0) + stats.get("graph_cache_misses", 0)
+    cache_rate = f"{stats['graph_cache_hits'] / total_cache * 100:.1f}%" if total_cache > 0 else "—"
+    avg_lift = round(stats["centrality_lift_total"] / stats["centrality_lift_count"], 4) if stats.get("centrality_lift_count", 0) > 0 else 0
+    total_results = stats.get("total_results_code", 0) + stats.get("total_results_notes", 0)
     avg_results = round(total_results / total_searches, 1) if total_searches > 0 else "—"
-    notes_pct = f"{g['search_notes_calls'] / total_searches * 100:.0f}%" if total_searches > 0 else "—"
+    notes_pct = f"{stats['search_notes_calls'] / total_searches * 100:.0f}%" if total_searches > 0 else "—"
 
     label = f"{v} (current)" if current else v
     lines = [label]
 
-    started = g.get("started_at", "")
+    started = stats.get("started_at", "")
     if current and started:
         try:
             delta = datetime.now(timezone.utc) - datetime.fromisoformat(started)
@@ -219,19 +221,19 @@ def _fmt_version_stats(v: str, g: dict, current: bool = False) -> str:
         except Exception:
             pass
     elif started:
-        last = g.get("last_saved", "")
+        last = stats.get("last_saved", "")
         period = started[:10]
         if last:
             period += f" → {last[:10]}"
         lines.append(f"  period: {period}")
 
     lines += [
-        f"  searches: code={g.get('search_code_calls', 0)} notes={g.get('search_notes_calls', 0)}  total={total_searches}  (notes {notes_pct})",
-        f"  results: code={g.get('total_results_code', 0)} notes={g.get('total_results_notes', 0)}  avg/search={avg_results}",
-        f"  centrality lift avg: {avg_lift} (across {g.get('centrality_lift_count', 0)} results)",
-        f"  PPR: {g.get('ppr_fires', 0)} fires ({ppr_rate} of note searches) · +{g.get('ppr_results_added', 0)} results · avg {avg_ppr}/fire",
+        f"  searches: code={stats.get('search_code_calls', 0)} notes={stats.get('search_notes_calls', 0)}  total={total_searches}  (notes {notes_pct})",
+        f"  results: code={stats.get('total_results_code', 0)} notes={stats.get('total_results_notes', 0)}  avg/search={avg_results}",
+        f"  centrality lift avg: {avg_lift} (across {stats.get('centrality_lift_count', 0)} results)",
+        f"  PPR: {stats.get('ppr_fires', 0)} fires ({ppr_rate} of note searches) · +{stats.get('ppr_results_added', 0)} results · avg {avg_ppr}/fire",
     ]
-    _ppr_diag = {k: g.get(k, 0) for k in ("ppr_nx_missing", "ppr_graph_missing", "ppr_no_matches", "ppr_below_threshold", "ppr_exception")}
+    _ppr_diag = {k: stats.get(k, 0) for k in ("ppr_nx_missing", "ppr_graph_missing", "ppr_no_matches", "ppr_below_threshold", "ppr_exception")}
     if any(_ppr_diag.values()):
         lines.append(
             f"  PPR misses: nx={_ppr_diag['ppr_nx_missing']} graph={_ppr_diag['ppr_graph_missing']}"
@@ -239,8 +241,8 @@ def _fmt_version_stats(v: str, g: dict, current: bool = False) -> str:
             f" exception={_ppr_diag['ppr_exception']}"
         )
     lines += [
-        f"  graph cache: {cache_rate} ({g.get('graph_cache_hits', 0)}/{total_cache})",
-        f"  reindexes: {g.get('reindex_count', 0)}",
+        f"  graph cache: {cache_rate} ({stats.get('graph_cache_hits', 0)}/{total_cache})",
+        f"  reindexes: {stats.get('reindex_count', 0)}",
     ]
     return "\n".join(lines)
 

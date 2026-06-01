@@ -40,9 +40,15 @@ Auth handled by Authelia at NPM proxy level. No in-app auth required.
 
 ```
 mcp/
-  server.py     # HTTP routes, middleware, watcher, __main__
-  config.py     # env vars, shared state, repos/graph/stats utils, embed
+  server.py     # startup only — threads, routes, middleware wiring, uvicorn
+  config.py     # env vars, embed(), warmup()
+  state.py      # global mutable state, stats lifecycle, graph cache
+  repos.py      # repo registry persistence (_load_repos, _save_repos, etc.)
+  onboarding.py # ONBOARDING_TEMPLATE + _merge_onboarding()
   reindex.py    # job queue, _stream, _run_reindex, _enqueue, _reindex_worker
+  middleware.py # _BearerTokenMiddleware, _NormalizeSSEPath
+  watcher.py    # _NotesHandler (debounced watchdog), _start_watcher()
+  routes.py     # all HTTP route handlers + webhook helpers
   tools.py      # FastMCP instance + all @mcp.tool() + @mcp.prompt()
   web_ui.py     # API handlers — search, status, stats
   template.py   # embedded HTML/CSS/JS dashboard + LOGO_SVG
@@ -75,7 +81,7 @@ docker-compose.yml  # ollama + qdrant + cortex-mcp
 
 ## Key patterns
 
-- Import chain (no circular deps): `config` ← `reindex` ← `tools` ← `server`
+- Import chain (no circular deps): `config` ← `state` ← `repos` ← `onboarding` (leaf modules); `reindex` ← `state`/`repos`; `tools`/`routes` ← all leaves; `server` ← everything
 - `mcp.sse_app()` returns Starlette app — mounted at `/sse` in server.py
 - `_job_queue` (deque) + `_reindex_worker` thread processes jobs sequentially — webhooks/watcher/MCP tool all call `_enqueue()`, nothing dropped
 - `_enqueue()` coalesces same-repo incremental webhook jobs (merges file lists instead of queuing duplicate)

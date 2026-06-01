@@ -12,10 +12,12 @@ from template import LOGO_SVG, UI_HTML  # noqa: F401 (LOGO_SVG re-exported for f
 
 
 async def ui(request: Request) -> HTMLResponse:
+    """Serve the web dashboard HTML."""
     return HTMLResponse(UI_HTML)
 
 
 async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONResponse:
+    """Semantic search over notes and/or code collections; returns scored results."""
     try:
         body = await request.json()
     except Exception:
@@ -46,6 +48,7 @@ async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONRespons
 
 
 async def api_status(request: Request, reindex_state: dict, job_queue: list = None) -> JSONResponse:
+    """Return current reindex job state, elapsed time, output tail, and queue snapshot."""
     s = reindex_state
     base = {"running": False, "elapsed_seconds": 0, "output": [], "error": None, "done": False, "queue": job_queue or [], "current_job": None}
     if s["started_at"] is None:
@@ -60,6 +63,7 @@ async def api_status(request: Request, reindex_state: dict, job_queue: list = No
 
 
 async def api_stats(request: Request, qdrant_url: str, ollama_url: str, graph_stats: dict = None) -> JSONResponse:
+    """Return Qdrant collection point counts, Ollama status, and optional graph stats payload."""
     client = QdrantClient(url=qdrant_url)
     result = {}
     try:

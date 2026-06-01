@@ -41,14 +41,17 @@ _store: dict = {
 
 
 def _iso(dt: datetime) -> str:
+    """Format datetime as UTC ISO 8601 string."""
     return dt.astimezone(timezone.utc).isoformat()
 
 
 def _now_iso() -> str:
+    """Return current UTC time as ISO 8601 string."""
     return _iso(datetime.now(timezone.utc))
 
 
 def _load() -> None:
+    """Load persisted OAuth state (clients, codes, tokens) from STATE_FILE into _store."""
     try:
         if STATE_FILE.exists():
             _store.update(json.loads(STATE_FILE.read_text()))
@@ -57,6 +60,7 @@ def _load() -> None:
 
 
 def _save() -> None:
+    """Persist _store to STATE_FILE as JSON."""
     try:
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATE_FILE.write_text(json.dumps(_store, indent=2))
@@ -65,12 +69,14 @@ def _save() -> None:
 
 
 def _purge_expired() -> None:
+    """Remove expired codes, access tokens, and refresh tokens from _store."""
     now = _now_iso()
     for key in ("codes", "tokens", "refresh_tokens"):
         _store[key] = {k: v for k, v in _store[key].items() if v.get("expires_at", "") > now}
 
 
 def _ensure_web_ui_client() -> None:
+    """Register the built-in web UI OAuth client, keeping its redirect_uri in sync with BASE_URL."""
     if _WEB_UI_CLIENT_ID not in _store["clients"]:
         _store["clients"][_WEB_UI_CLIENT_ID] = {
             "client_id": _WEB_UI_CLIENT_ID,
@@ -91,6 +97,7 @@ _ensure_web_ui_client()
 
 
 def verify_token(token: str) -> bool:
+    """Return True if token exists in _store and has not expired."""
     entry = _store["tokens"].get(token)
     if not entry:
         return False
@@ -98,6 +105,7 @@ def verify_token(token: str) -> bool:
 
 
 def _pkce_verify(verifier: str, challenge: str) -> bool:
+    """Verify a PKCE S256 code_verifier against a stored code_challenge."""
     digest = hashlib.sha256(verifier.encode()).digest()
     computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
     return secrets.compare_digest(computed, challenge)
@@ -106,6 +114,7 @@ def _pkce_verify(verifier: str, challenge: str) -> bool:
 # --- Request handlers ---
 
 async def well_known_as(request: Request) -> JSONResponse:
+    """RFC 8414: serve Authorization Server metadata at /.well-known/oauth-authorization-server."""
     return JSONResponse({
         "issuer": BASE_URL,
         "authorization_endpoint": BASE_URL + "/authorize",
@@ -119,6 +128,7 @@ async def well_known_as(request: Request) -> JSONResponse:
 
 
 async def well_known_resource(request: Request) -> JSONResponse:
+    """RFC 8414: serve Protected Resource metadata at /.well-known/oauth-protected-resource."""
     return JSONResponse({
         "resource": BASE_URL,
         "authorization_servers": [BASE_URL],
@@ -126,6 +136,7 @@ async def well_known_resource(request: Request) -> JSONResponse:
 
 
 async def register(request: Request) -> JSONResponse:
+    """RFC 7591: Dynamic Client Registration — issue a new client_id."""
     try:
         body = await request.json()
     except Exception:
@@ -217,6 +228,7 @@ def _render_form(
 
 
 async def authorize_get(request: Request) -> HTMLResponse | JSONResponse:
+    """Render the PKCE authorization form; validate client_id, redirect_uri, and S256 challenge."""
     p = request.query_params
     response_type = p.get("response_type", "")
     client_id = p.get("client_id", "")
@@ -249,6 +261,7 @@ async def authorize_get(request: Request) -> HTMLResponse | JSONResponse:
 
 
 async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | JSONResponse:
+    """Validate password, issue auth code, and redirect to redirect_uri with code + state."""
     form = await request.form()
     password = form.get("password", "")
     client_id = form.get("client_id", "")
@@ -287,6 +300,7 @@ async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | 
 
 
 async def token_endpoint(request: Request) -> JSONResponse:
+    """Issue access + refresh tokens for authorization_code grant, or rotate access token for refresh_token grant."""
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
         try:
