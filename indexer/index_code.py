@@ -65,11 +65,25 @@ def clone_or_pull(repo: str) -> Path:
     dest = REPOS_DIR / name
     auth_url = f"https://Xoudusz:{TOKEN}@github.com/{repo}.git"
     if dest.exists():
-        print(f"  pulling {repo}...")
-        subprocess.run(["git", "-C", str(dest), "pull", "--quiet"], check=False)
+        print(f"  pulling {repo}...", flush=True)
+        result = subprocess.run(
+            ["git", "-C", str(dest), "pull"],
+            capture_output=True, text=True,
+        )
+        for line in result.stdout.strip().splitlines():
+            print(f"    {line}", flush=True)
+        if result.returncode != 0:
+            print(f"    git pull failed (rc={result.returncode}): {result.stderr.strip()}", flush=True)
     else:
-        print(f"  cloning {repo}...")
-        subprocess.run(["git", "clone", "--quiet", auth_url, str(dest)], check=True)
+        print(f"  cloning {repo} (shallow)...", flush=True)
+        result = subprocess.run(
+            ["git", "clone", "--depth=1", auth_url, str(dest)],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(result.returncode, "git clone", result.stderr)
+        for line in result.stdout.strip().splitlines():
+            print(f"    {line}", flush=True)
     return dest
 
 
@@ -98,24 +112,24 @@ def main():
             COLLECTION,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
-        print(f"Created collection '{COLLECTION}'")
+        print(f"Created collection '{COLLECTION}'", flush=True)
 
     from chunker import _TS_AVAILABLE
-    print(f"Chunking mode: {'tree-sitter' if _TS_AVAILABLE else 'sliding-window (fallback)'}")
+    print(f"Chunking mode: {'tree-sitter' if _TS_AVAILABLE else 'sliding-window (fallback)'}", flush=True)
 
     for repo in repos:
         name = repo.split("/")[1]
         try:
             repo_path = clone_or_pull(repo)
         except subprocess.CalledProcessError as e:
-            print(f"  SKIP {repo}: {e}")
+            print(f"  SKIP {repo}: {e}", flush=True)
             continue
 
         incremental = args.files is not None or args.remove_files is not None
         if incremental:
             all_to_delete = list(set((args.files or []) + (args.remove_files or [])))
             if all_to_delete:
-                print(f"  {name}: removing old chunks for {len(all_to_delete)} files")
+                print(f"  {name}: removing old chunks for {len(all_to_delete)} files", flush=True)
                 for rel in all_to_delete:
                     try:
                         client.delete(
@@ -126,13 +140,13 @@ def main():
                             ]))
                         )
                     except Exception as e:
-                        print(f"  warn: delete {rel}: {e}")
+                        print(f"  warn: delete {rel}: {e}", flush=True)
             code_files = [
                 repo_path / f for f in (args.files or [])
                 if (repo_path / f).exists() and Path(f).suffix in CODE_EXTS
                 and not any(s in Path(f).parts for s in SKIP_DIRS)
             ]
-            print(f"  {name}: incremental — {len(code_files)} files to re-index, {len(args.remove_files or [])} removed")
+            print(f"  {name}: incremental — {len(code_files)} files to re-index, {len(args.remove_files or [])} removed", flush=True)
         else:
             code_files = [
                 p for p in repo_path.rglob("*")
@@ -143,7 +157,9 @@ def main():
         total = 0
         file_point_ids: dict = {}
 
-        for path in code_files:
+        for i, path in enumerate(code_files):
+            if i % 10 == 0 and i > 0:
+                print(f"  {name}: {i}/{len(code_files)} files, {total} chunks so far...", flush=True)
             points = []
             for chunk in chunk_file(path, name):
                 cid = int(hashlib.md5(
@@ -155,7 +171,7 @@ def main():
                 client.upsert(COLLECTION, points)
                 total += len(points)
 
-        print(f"  {name}: {total} chunks from {len(code_files)} files")
+        print(f"  {name}: {total} chunks from {len(code_files)} files", flush=True)
 
         try:
             import graph as _graph
@@ -177,9 +193,9 @@ def main():
                             points=point_ids,
                         )
         except Exception as e:
-            print(f"  graph build failed for {name}: {e}")
+            print(f"  graph build failed for {name}: {e}", flush=True)
 
-    print("\nDone.")
+    print("\nDone.", flush=True)
 
     if not args.repo:
         try:
@@ -191,7 +207,7 @@ def main():
             }
             _graph.build_global_graph(repo_paths_map)
         except Exception as e:
-            print(f"  global graph build failed: {e}")
+            print(f"  global graph build failed: {e}", flush=True)
 
 
 if __name__ == "__main__":

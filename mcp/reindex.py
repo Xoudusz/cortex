@@ -2,6 +2,7 @@
 """Job queue and reindex execution for cortex-mcp."""
 
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -21,7 +22,8 @@ _reindex_state: dict = {
 
 
 def _stream(cmd: list, label: str, timeout: int) -> None:
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     try:
         for line in proc.stdout:
             line = line.rstrip()
