@@ -15,8 +15,8 @@ _job_queue: deque = deque()
 _job_lock = threading.Lock()
 _worker_event = threading.Event()
 _reindex_state: dict = {
-    "running": False, "started_at": None, "output": [],
-    "error": None, "done": False, "queue_depth": 0,
+    "running": False, "started_at": None, "finished_at": None, "output": [],
+    "error": None, "done": False, "queue_depth": 0, "current_job": None,
 }
 
 
@@ -32,8 +32,12 @@ def _stream(cmd: list, label: str, timeout: int) -> None:
 
 
 def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=None) -> None:
-    _reindex_state.update(running=True, started_at=time.time(), output=[], error=None, done=False)
     mode = "incremental" if files is not None else "full"
+    _reindex_state.update(
+        running=True, started_at=time.time(), finished_at=None,
+        output=[], error=None, done=False,
+        current_job={"notes": notes, "code": code, "repo": repo, "mode": mode},
+    )
     log.info("reindex started (notes=%s code=%s repo=%s mode=%s)", notes, code, repo or "all", mode)
     try:
         if notes:
@@ -57,8 +61,9 @@ def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=No
         _reindex_state["error"] = str(e)
         log.error("reindex error: %s", e)
     finally:
-        elapsed = time.time() - _reindex_state["started_at"]
-        _reindex_state.update(running=False, done=True)
+        t = time.time()
+        elapsed = t - _reindex_state["started_at"]
+        _reindex_state.update(running=False, done=True, finished_at=t, current_job=None)
         log.info("reindex finished in %.0fs", elapsed)
 
 

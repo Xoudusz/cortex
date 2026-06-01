@@ -458,24 +458,29 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
-        function updateQueueDisplay(queue) {
+        function jobLabel(j) {
+            if (!j) return '';
+            if (j.notes && j.code) return j.repo ? 'All (' + j.repo + ')' : 'All';
+            if (j.notes) return 'Notes';
+            if (j.code) return j.repo ? 'Code (' + j.repo + ')' : 'Code';
+            return '?';
+        }
+
+        function updateQueueDisplay(currentJob, queue) {
             const el = document.getElementById('queue-list');
-            if (!queue || !queue.length) { el.style.display = 'none'; return; }
-            const labels = queue.map(j => {
-                if (j.notes && j.code) return j.repo ? 'All (' + j.repo + ')' : 'All';
-                if (j.notes) return 'Notes';
-                if (j.code) return j.repo ? 'Code (' + j.repo + ')' : 'Code';
-                return '?';
-            });
-            el.textContent = 'Queued: ' + labels.join(' → ');
+            const parts = [];
+            if (currentJob) parts.push('Running: ' + jobLabel(currentJob));
+            if (queue && queue.length) parts.push('Queued: ' + queue.map(jobLabel).join(' → '));
+            if (!parts.length) { el.style.display = 'none'; return; }
+            el.textContent = parts.join('  |  ');
             el.style.display = '';
         }
 
-        function syncButtonStates(running, queue) {
+        function syncButtonStates(currentJob, queue) {
             const all = document.getElementById('reindex-all');
             const notes = document.getElementById('reindex-notes');
             const code = document.getElementById('reindex-code');
-            const activeJobs = [...(running ? [{ notes: true, code: true }] : []), ...(queue || [])];
+            const activeJobs = [...(currentJob ? [currentJob] : []), ...(queue || [])];
             const notesActive = activeJobs.some(j => j.notes);
             const codeActive = activeJobs.some(j => j.code);
             [all, notes, code].forEach(b => { b.disabled = false; if (b._origText) { b.textContent = b._origText; delete b._origText; } });
@@ -497,8 +502,8 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     statusDiv.textContent = text;
                     statusDiv.scrollTop = statusDiv.scrollHeight;
                     statusDot.classList.toggle('active', !!data.running);
-                    updateQueueDisplay(data.queue);
-                    syncButtonStates(data.running, data.queue);
+                    updateQueueDisplay(data.current_job, data.queue);
+                    syncButtonStates(data.current_job, data.queue);
                     if (data.done && !data.running && !(data.queue && data.queue.length)) {
                         clearInterval(statusPoll); statusPoll = null; statusDiv.classList.remove('status-running'); loadStats(); loadRepoFilter();
                     }

@@ -47,11 +47,16 @@ async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONRespons
 
 async def api_status(request: Request, reindex_state: dict, job_queue: list = None) -> JSONResponse:
     s = reindex_state
-    base = {"running": False, "elapsed_seconds": 0, "output": [], "error": None, "done": False, "queue": job_queue or []}
+    base = {"running": False, "elapsed_seconds": 0, "output": [], "error": None, "done": False, "queue": job_queue or [], "current_job": None}
     if s["started_at"] is None:
         return JSONResponse(base)
-    elapsed = time.time() - s["started_at"]
-    return JSONResponse({**base, "running": s["running"], "elapsed_seconds": round(elapsed, 1), "output": s["output"][-100:], "error": s["error"], "done": s["done"]})
+    if s["running"]:
+        elapsed = time.time() - s["started_at"]
+    elif s["finished_at"]:
+        elapsed = s["finished_at"] - s["started_at"]
+    else:
+        elapsed = 0
+    return JSONResponse({**base, "running": s["running"], "elapsed_seconds": round(elapsed, 1), "output": s["output"][-100:], "error": s["error"], "done": s["done"], "current_job": s.get("current_job")})
 
 
 async def api_stats(request: Request, qdrant_url: str, ollama_url: str, graph_stats: dict = None) -> JSONResponse:
