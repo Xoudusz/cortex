@@ -242,6 +242,7 @@ def _fmt_version_stats(v: str, stats: dict, current: bool = False) -> str:
         )
     lines += [
         f"  graph cache: {cache_rate} ({stats.get('graph_cache_hits', 0)}/{total_cache})",
+        f"  embed cache skipped: notes={stats.get('embed_cache_notes', 0)} code={stats.get('embed_cache_code', 0)}",
         f"  reindexes: {stats.get('reindex_count', 0)}",
     ]
     return "\n".join(lines)

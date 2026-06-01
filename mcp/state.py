@@ -30,6 +30,8 @@ def _default_stats() -> dict:
         "graph_cache_hits": 0,
         "graph_cache_misses": 0,
         "reindex_count": 0,
+        "embed_cache_notes": 0,
+        "embed_cache_code": 0,
         "total_results_code": 0,
         "total_results_notes": 0,
         "ppr_nx_missing": 0,

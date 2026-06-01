@@ -3,6 +3,7 @@
 
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -32,6 +33,14 @@ def _stream(cmd: list, label: str, timeout: int) -> None:
             line = line.rstrip()
             _reindex_state["output"].append(f"[{label}] {line}")
             log.info("[%s] %s", label, line)
+            if label == "notes":
+                m = re.search(r"(\d+)/\d+ files cached", line)
+                if m:
+                    _stats["embed_cache_notes"] += int(m.group(1))
+            elif label == "code":
+                m = re.search(r"\((\d+) cached\)", line)
+                if m:
+                    _stats["embed_cache_code"] += int(m.group(1))
     finally:
         proc.wait(timeout=timeout)
 
