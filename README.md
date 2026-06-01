@@ -12,14 +12,19 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 
 ## Endpoints
 
-| Path | Method | Description |
-|------|--------|-------------|
-| `/` | GET | Web UI (Authelia protected) |
-| `/sse` | GET | MCP SSE endpoint (requires `x-api-key` header; internally rewritten to `/sse/sse` via ASGI middleware) |
-| `/health` | GET | Health check for autoheal |
-| `/webhook` | POST | GitHub push webhook — triggers per-repo code reindex |
-| `/api/graph/{repo}` | GET | Graph JSON — `notes` = wikilink graph, `global` = cross-repo graph, or repo name |
-| `/api/stats` | GET | Efficiency metrics — centrality lift, PPR hit rate, cache stats |
+| Path | Method | Auth | Description |
+|------|--------|------|-------------|
+| `/` | GET | OAuth (Bearer) | Web UI dashboard |
+| `/sse` | GET | OAuth (Bearer) | MCP SSE endpoint (rewritten to `/sse/sse` via ASGI middleware) |
+| `/health` | GET | None | Health check for autoheal |
+| `/webhook` | POST | HMAC signature | GitHub push webhook — triggers per-repo code reindex |
+| `/api/graph/{repo}` | GET | OAuth (Bearer) | Graph JSON — `notes` = wikilink, `global` = cross-repo, or repo name |
+| `/api/stats` | GET | OAuth (Bearer) | Efficiency metrics — centrality lift, PPR hit rate, cache stats |
+| `/authorize` | GET/POST | None | OAuth authorization endpoint — password-gated login form |
+| `/token` | POST | None | OAuth token endpoint — code exchange + refresh |
+| `/register` | POST | None | OAuth Dynamic Client Registration (RFC 7591) |
+| `/.well-known/oauth-authorization-server` | GET | None | OAuth AS metadata (RFC 8414) |
+| `/.well-known/oauth-protected-resource` | GET | None | OAuth protected resource metadata |
 
 ## Deploy (Portainer)
 
@@ -27,7 +32,7 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 2. URL: `https://github.com/Xoudusz/cortex`
 3. Auth: `Xoudusz` / PAT (Contents: Read)
 4. Compose path: `docker-compose.yml`
-5. Set `API_KEY` env var in Portainer stack settings
+5. Set env vars in Portainer stack settings: `ADMIN_PASSWORD`, `BASE_URL`, `GITHUB_TOKEN`, `WEBHOOK_SECRET`
 6. Deploy
 
 **Post-deploy — pull embedding model:**
@@ -44,23 +49,25 @@ Or set `GITHUB_TOKEN` env var in Portainer stack settings to enable private repo
 ## Register MCP in Claude Code (run on client)
 
 ```bash
-claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse \
-  --header "x-api-key: <your-api-key>"
+claude mcp add cortex --transport sse https://cortex.hyvitech.org/sse
 ```
+
+OAuth login opens in browser on first connection. Tokens persist (30-day access, 90-day refresh).
 
 ## Environment variables
 
 | Var | Default | Purpose |
-|-----|---------|---------| 
+|-----|---------|---------|
+| `ADMIN_PASSWORD` | — | Required — OAuth login form password |
+| `BASE_URL` | `https://cortex.hyvitech.org` | Public URL — used in OAuth metadata + token issuer |
+| `GITHUB_TOKEN` | — | For cloning private repos |
+| `WEBHOOK_SECRET` | — | GitHub webhook HMAC signature validation |
 | `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant endpoint |
 | `NOTES_PATH` | `/notes` | Notes mount path (watched for changes) |
 | `MCP_HOST` | `0.0.0.0` | Server bind host |
 | `MCP_PORT` | `8765` | Server bind port |
-| `API_KEY` | — | Required for `/sse` endpoint auth |
 | `WATCH_DEBOUNCE` | `60` | Seconds to debounce notes watcher |
-| `GITHUB_TOKEN` | — | For cloning private repos |
-| `WEBHOOK_SECRET` | — | GitHub webhook signature validation |
 
 ## Re-index
 
@@ -146,9 +153,21 @@ Exposed as `GET /api/graph/global`. Dashboard: Graph tab → **★ Global (cross
 - **Per-repo view:** force-directed D3.js graph — nodes sized by centrality, colored by community, arrows colored by edge type (import/call/inherits)
 - **★ Global view:** repo nodes with dashed cross-repo edges; click shows source files
 
+## Auth
+
+Cortex is its own OAuth 2.0 Authorization Server (`mcp/oauth.py`) — no external identity provider needed.
+
+- **Standards:** RFC 8414 (AS metadata), RFC 7591 (Dynamic Client Registration), RFC 7636 (PKCE S256)
+- **Grants:** Authorization code + refresh token
+- **Session:** 30-day access tokens, 90-day refresh tokens
+- **Persistence:** OAuth state saved to `/app/data/oauth_state.json` — survives container restarts
+- **Gate:** Password prompt at `/authorize` (set via `ADMIN_PASSWORD`)
+
+Claude Desktop and Claude Code discover the OAuth server automatically via `/.well-known/oauth-authorization-server`.
+
 ## Volume paths
 
 - Ollama models: `/mnt/data/ai/ollama` (RAID)
 - Qdrant storage: `/home/docker/volumes/qdrant/storage`
 - Notes (read-only mount from Syncthing): `/home/docker/volumes/syncthing/notes`
-- Graph data: `/app/data/` (inside container, via cortex-mcp volume)
+- App data (graphs, repos config, OAuth state): `/home/docker/volumes/cortex/config` → `/app/data/`
