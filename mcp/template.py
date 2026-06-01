@@ -107,6 +107,12 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         .stat-value.error { color: var(--error); }
         .section { margin-top: 1.5rem; }
         .section-title { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem; }
+        .admin-tabs { display:flex; gap:0.2rem; margin-bottom:0; border-bottom:1px solid var(--border); }
+        .admin-tab { background:transparent; border:none; border-bottom:2px solid transparent; color:var(--text-muted); padding:0.4rem 0.75rem; cursor:pointer; font-size:0.8rem; font-weight:500; transition:all 0.15s; margin-bottom:-1px; border-radius:0; }
+        .admin-tab:hover { color:var(--text); transform:none; box-shadow:none; background:transparent; }
+        .admin-tab.active { color:var(--accent); border-bottom-color:var(--accent); background:transparent; }
+        .admin-section { display:none; padding-top:1rem; }
+        .admin-section.active { display:block; }
         .reindex-buttons { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
         .status-log { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.875rem 1rem; font-family: 'SF Mono', 'Fira Code', Consolas, monospace; font-size: 0.75rem; max-height: 280px; overflow-y: auto; white-space: pre-wrap; color: var(--text-muted); line-height: 1.5; }
         .status-running { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
@@ -185,13 +191,13 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <div class="stat-card"><div class="stat-label">Code chunks</div><div class="stat-value" id="stat-code">-</div></div>
                 <div class="stat-card"><div class="stat-label">Ollama</div><div class="stat-value" id="stat-ollama">-</div></div>
             </div>
-            <div class="section">
-                <div class="section-title">Graph Efficiency</div>
-                <table class="webhook-table"><tbody id="graph-stats-body"><tr><td colspan="2" class="empty">Load admin tab to populate.</td></tr></tbody></table>
-                <div style="margin-top:0.5rem;text-align:right"><button id="history-btn" style="display:none;background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:0.3rem 0.75rem;font-size:0.8rem;cursor:pointer">Show past versions</button></div>
+            <div class="admin-tabs">
+                <button class="admin-tab active" data-admin-tab="reindex">Reindex</button>
+                <button class="admin-tab" data-admin-tab="graph">Graph Efficiency</button>
+                <button class="admin-tab" data-admin-tab="webhooks">Webhooks</button>
+                <button class="admin-tab" data-admin-tab="logs">Logs</button>
             </div>
-            <div class="section">
-                <div class="section-title">Reindex</div>
+            <div id="admin-reindex" class="admin-section active">
                 <div class="reindex-buttons">
                     <button id="reindex-all">Reindex All</button>
                     <button id="reindex-notes" class="secondary">Notes Only</button>
@@ -199,13 +205,17 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 </div>
                 <div id="queue-list" style="display:none;font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem;padding:0.3rem 0.5rem;background:var(--accent-dim);border-radius:4px"></div>
                 <div id="reindex-status" class="status-log">No reindex running.</div>
+                <div style="margin-top:1.25rem"><div class="section-title">Job History</div><div id="reindex-log-wrap"><div class="empty">No jobs run yet.</div></div></div>
             </div>
-            <div class="section">
-                <div class="section-title">Recent Webhooks</div>
+            <div id="admin-graph" class="admin-section">
+                <table class="webhook-table"><tbody id="graph-stats-body"><tr><td colspan="2" class="empty">Click Graph Efficiency to load.</td></tr></tbody></table>
+                <div style="margin-top:0.5rem;text-align:right"><button id="history-btn" style="display:none;background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:0.3rem 0.75rem;font-size:0.8rem;cursor:pointer">Show past versions</button></div>
+            </div>
+            <div id="admin-webhooks" class="admin-section">
                 <div id="webhook-log-wrap"><div class="empty">No webhooks received yet.</div></div>
             </div>
-            <div class="section">
-                <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">Server Logs<div style="display:flex;gap:0.5rem;align-items:center"><label style="font-size:0.75rem;color:var(--text-muted);cursor:pointer"><input type="checkbox" id="log-tail-toggle" style="margin-right:0.25rem">tail</label><button onclick="loadLogs()" class="secondary" style="padding:0.2rem 0.6rem;font-size:0.75rem">Refresh</button></div></div>
+            <div id="admin-logs" class="admin-section">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem"><span style="font-size:0.75rem;color:var(--text-muted)">Last 200 lines</span><div style="display:flex;gap:0.5rem;align-items:center"><label style="font-size:0.75rem;color:var(--text-muted);cursor:pointer"><input type="checkbox" id="log-tail-toggle" style="margin-right:0.25rem">tail</label><button onclick="loadLogs()" class="secondary" style="padding:0.2rem 0.6rem;font-size:0.75rem">Refresh</button></div></div>
                 <pre id="log-output" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem;font-size:0.7rem;max-height:300px;overflow-y:auto;color:var(--text-muted);white-space:pre-wrap;word-break:break-all">No logs loaded.</pre>
             </div>
         </div>
@@ -316,9 +326,21 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
                 tab.classList.add('active');
                 document.getElementById(tab.dataset.tab + '-panel').classList.add('active');
-                if (tab.dataset.tab === 'admin') { loadStats(); loadWebhookLog(); loadLogs(); }
+                if (tab.dataset.tab === 'admin') { loadStats(); loadReindexLog(); }
                 if (tab.dataset.tab === 'repos') loadRepos();
                 if (tab.dataset.tab === 'graph') loadGraphRepos();
+            });
+        });
+        document.querySelectorAll('.admin-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('admin-' + tab.dataset.adminTab).classList.add('active');
+                if (tab.dataset.adminTab === 'reindex') loadReindexLog();
+                if (tab.dataset.adminTab === 'graph') loadStats();
+                if (tab.dataset.adminTab === 'webhooks') loadWebhookLog();
+                if (tab.dataset.adminTab === 'logs') loadLogs();
             });
         });
 
@@ -428,6 +450,17 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             } catch (err) { wrap.innerHTML = '<div class="empty">Failed to load webhook log.</div>'; }
         }
 
+        async function loadReindexLog() {
+            const wrap = document.getElementById('reindex-log-wrap');
+            try {
+                const data = await api('/api/reindex-log');
+                const log = data.log || [];
+                if (!log.length) { wrap.innerHTML = '<div class="empty">No jobs run yet.</div>'; return; }
+                wrap.innerHTML = '<table class="webhook-table"><thead><tr><th>Type</th><th>Mode</th><th>Time</th><th>Duration</th><th>Status</th></tr></thead><tbody>' +
+                    log.map(e => '<tr><td>' + escapeHtml(e.type) + '</td><td style="color:var(--text-muted)">' + escapeHtml(e.mode) + '</td><td>' + timeAgo(e.ts) + '</td><td style="color:var(--text-muted)">' + e.duration + 's</td><td class="' + (e.status === 'done' ? 'wh-done' : 'wh-failed') + '">' + escapeHtml(e.status) + (e.error ? ' — ' + escapeHtml(e.error.slice(0,40)) : '') + '</td></tr>').join('') + '</tbody></table>';
+            } catch (err) { wrap.innerHTML = '<div class="empty">Failed to load job history.</div>'; }
+        }
+
         let _logTailInterval = null;
         async function loadLogs() {
             const pre = document.getElementById('log-output');
@@ -505,7 +538,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     updateQueueDisplay(data.current_job, data.queue);
                     syncButtonStates(data.current_job, data.queue);
                     if (data.done && !data.running && !(data.queue && data.queue.length)) {
-                        clearInterval(statusPoll); statusPoll = null; statusDiv.classList.remove('status-running'); loadStats(); loadRepoFilter();
+                        clearInterval(statusPoll); statusPoll = null; statusDiv.classList.remove('status-running'); loadStats(); loadRepoFilter(); loadReindexLog();
                     }
                 } catch (err) { statusDiv.textContent = 'Error polling status: ' + err.message; }
             };

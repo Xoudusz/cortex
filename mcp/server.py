@@ -23,7 +23,7 @@ from config import (
     OLLAMA_URL, QDRANT_URL, STATS_FILE, VERSION,
     WATCH_DEBOUNCE, WEBHOOK_SECRET, HOST, PORT,
     _load_repos, _load_repos_meta, _save_repos,
-    _update_indexed_at, _webhook_log, _stats_saver, embed, warmup,
+    _update_indexed_at, _webhook_log, _reindex_log, _stats_saver, embed, warmup,
 )
 from reindex import _enqueue, _job_lock, _job_queue, _reindex_state, _reindex_worker
 from tools import mcp
@@ -221,6 +221,10 @@ async def _api_webhook_log_handler(request: Request) -> JSONResponse:
     return JSONResponse({"log": _webhook_log})
 
 
+async def _api_reindex_log_handler(request: Request) -> JSONResponse:
+    return JSONResponse({"log": _reindex_log})
+
+
 async def _api_logs_handler(request: Request) -> JSONResponse:
     try:
         n = int(request.query_params.get("lines", 200))
@@ -277,6 +281,7 @@ if __name__ == "__main__":
         Route("/api/repos-meta", _api_repos_meta_handler, methods=["GET"]),
         Route("/api/github/repos", _api_github_repos, methods=["GET"]),
         Route("/api/webhook-log", _api_webhook_log_handler, methods=["GET"]),
+        Route("/api/reindex-log", _api_reindex_log_handler, methods=["GET"]),
         Route("/api/logs", _api_logs_handler, methods=["GET"]),
         Route("/api/graph/{repo:path}", _api_graph_handler, methods=["GET"]),
         Route("/.well-known/oauth-authorization-server", _oauth.well_known_as),

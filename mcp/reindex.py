@@ -7,8 +7,9 @@ import subprocess
 import threading
 import time
 from collections import deque
+from datetime import datetime, timezone
 
-from config import _invalidate_graph_cache, _load_repos, _update_indexed_at, _stats
+from config import _invalidate_graph_cache, _load_repos, _reindex_log, _update_indexed_at, _stats
 
 log = logging.getLogger("cortex")
 
@@ -98,3 +99,15 @@ def _reindex_worker() -> None:
             entry = job.get("_log_entry")
             if entry:
                 entry["status"] = "failed" if _reindex_state.get("error") else "done"
+            label = []
+            if job["notes"]: label.append("Notes")
+            if job["code"]: label.append("Code" + (f" ({job['repo']})" if job.get("repo") else ""))
+            _reindex_log.insert(0, {
+                "type": " + ".join(label) or "?",
+                "mode": "incremental" if job.get("files") is not None else "full",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "duration": round((_reindex_state.get("finished_at") or 0) - (_reindex_state.get("started_at") or 0), 1),
+                "status": "failed" if _reindex_state.get("error") else "done",
+                "error": _reindex_state.get("error"),
+            })
+            _reindex_log[:] = _reindex_log[:50]

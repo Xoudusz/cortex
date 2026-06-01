@@ -46,6 +46,7 @@ DEFAULT_REPOS = [
 ]
 
 _webhook_log: list = []
+_reindex_log: list = []
 _graph_cache: dict = {}
 
 
