@@ -129,6 +129,7 @@ def _default_stats() -> dict:
         "ppr_graph_missing": 0,
         "ppr_no_matches": 0,
         "ppr_below_threshold": 0,
+        "ppr_exception": 0,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 

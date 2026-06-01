@@ -75,7 +75,7 @@ def search_notes(query: str, limit: int = 5) -> str:
                 if not any(f in _nodes for f in matched_files):
                     _stats["ppr_no_matches"] += 1
                 else:
-                    extras = ppr_augment(matched_files, matched_scores, graph_path)
+                    extras, reason = ppr_augment(matched_files, matched_scores, graph_path, _return_reason=True)
                     if extras:
                         _stats["ppr_fires"] += 1
                         _stats["ppr_results_added"] += len(extras)
@@ -83,6 +83,8 @@ def search_notes(query: str, limit: int = 5) -> str:
                         for e in extras:
                             ppr_lines.append(f"  -> {e['file']} (ppr: {e['ppr_score']})")
                         parts.append("\n".join(ppr_lines))
+                    elif reason == "exception":
+                        _stats["ppr_exception"] += 1
                     else:
                         _stats["ppr_below_threshold"] += 1
         except Exception:
@@ -229,11 +231,12 @@ def _fmt_version_stats(v: str, g: dict, current: bool = False) -> str:
         f"  centrality lift avg: {avg_lift} (across {g.get('centrality_lift_count', 0)} results)",
         f"  PPR: {g.get('ppr_fires', 0)} fires ({ppr_rate} of note searches) · +{g.get('ppr_results_added', 0)} results · avg {avg_ppr}/fire",
     ]
-    _ppr_diag = {k: g.get(k, 0) for k in ("ppr_nx_missing", "ppr_graph_missing", "ppr_no_matches", "ppr_below_threshold")}
+    _ppr_diag = {k: g.get(k, 0) for k in ("ppr_nx_missing", "ppr_graph_missing", "ppr_no_matches", "ppr_below_threshold", "ppr_exception")}
     if any(_ppr_diag.values()):
         lines.append(
             f"  PPR misses: nx={_ppr_diag['ppr_nx_missing']} graph={_ppr_diag['ppr_graph_missing']}"
             f" no_match={_ppr_diag['ppr_no_matches']} below_threshold={_ppr_diag['ppr_below_threshold']}"
+            f" exception={_ppr_diag['ppr_exception']}"
         )
     lines += [
         f"  graph cache: {cache_rate} ({g.get('graph_cache_hits', 0)}/{total_cache})",

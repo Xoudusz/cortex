@@ -58,10 +58,16 @@ def persist_notes_graph(G) -> None:
     print(f"  notes graph: {len(data['nodes'])} nodes, {len(data['edges'])} wikilink edges -> {out.name}")
 
 
-def ppr_augment(matched_files: list, scores: list, graph_path: Path, threshold: float = 0.03) -> list:
-    """Personalized PageRank over wikilink graph seeded from vector-matched notes."""
+def ppr_augment(matched_files: list, scores: list, graph_path: Path, threshold: float = 0.03, _return_reason: bool = False):
+    """Personalized PageRank over wikilink graph seeded from vector-matched notes.
+
+    _return_reason=True: returns (results, reason) where reason is "ok", "exception", or "below_threshold".
+    """
+    def _ret(results, reason):
+        return (results, reason) if _return_reason else results
+
     if not _NX_AVAILABLE or not graph_path.exists():
-        return []
+        return _ret([], "nx_or_missing")
     try:
         data = json.loads(graph_path.read_text())
         G = nx.DiGraph()
@@ -71,9 +77,9 @@ def ppr_augment(matched_files: list, scores: list, graph_path: Path, threshold: 
         )
         G.add_edges_from([(e["source"], e["target"]) for e in data.get("edges", [])])
     except Exception:
-        return []
+        return _ret([], "exception")
     if len(G) < 2:
-        return []
+        return _ret([], "exception")
     total = sum(scores) or 1.0
     personalization: dict = {n: 1e-6 for n in G.nodes}
     for f, s in zip(matched_files, scores):
@@ -84,10 +90,11 @@ def ppr_augment(matched_files: list, scores: list, graph_path: Path, threshold: 
     try:
         ppr = nx.pagerank(G, alpha=0.85, personalization=personalization, max_iter=100)
     except Exception:
-        return []
+        return _ret([], "exception")
     matched_set = set(matched_files)
-    return [
+    results = [
         {"file": node, "ppr_score": round(score, 4)}
         for node, score in sorted(ppr.items(), key=lambda x: -x[1])
         if node not in matched_set and score >= threshold
     ][:5]
+    return _ret(results, "ok" if results else "below_threshold")
