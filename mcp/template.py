@@ -345,7 +345,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         });
 
         const statusDot = document.getElementById('status-dot');
-        async function pollStatusDot() { try { const data = await api('/api/status'); statusDot.classList.toggle('active', !!data.running); } catch (_) {} }
+        async function pollStatusDot() { try { const data = await api('/api/status'); statusDot.classList.toggle('active', !!data.running); if ((data.running || (data.queue && data.queue.length)) && !statusPoll) pollStatus(); } catch (_) {} }
         pollStatusDot();
         setInterval(pollStatusDot, 5000);
 
