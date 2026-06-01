@@ -128,10 +128,15 @@ def main():
         print(f"Created collection '{COLLECTION}'", flush=True)
 
     coll_info = client.get_collection(COLLECTION)
-    sparse_migration = not bool(coll_info.config.params.sparse_vectors_config)
-    if sparse_migration:
-        client.update_collection(COLLECTION, sparse_vectors_config={"sparse": SparseVectorParams()})
-        print(f"  Added sparse vector config to '{COLLECTION}' — forcing full re-embed for migration", flush=True)
+    sparse_migration = False
+    try:
+        has_sparse = bool(getattr(coll_info.config.params, 'sparse_vectors_config', None))
+        if not has_sparse:
+            client.update_collection(COLLECTION, sparse_vectors_config={"sparse": SparseVectorParams()})
+            sparse_migration = True
+            print(f"  Added sparse vector config to '{COLLECTION}' — forcing full re-embed for migration", flush=True)
+    except Exception as e:
+        print(f"  warn: sparse migration failed: {e}", flush=True)
 
     from chunker import _TS_AVAILABLE
     print(f"Chunking mode: {'tree-sitter' if _TS_AVAILABLE else 'sliding-window (fallback)'}", flush=True)

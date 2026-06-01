@@ -107,12 +107,15 @@ def main():
         print(f"Created collection '{COLLECTION}'")
 
     coll_info = client.get_collection(COLLECTION)
-    if not coll_info.config.params.sparse_vectors_config:
-        client.update_collection(COLLECTION, sparse_vectors_config={"sparse": SparseVectorParams()})
-        print("  Added sparse vector config to 'notes' — forcing full re-embed for migration", flush=True)
-        cache_override = True
-    else:
-        cache_override = False
+    cache_override = False
+    try:
+        has_sparse = bool(getattr(coll_info.config.params, 'sparse_vectors_config', None))
+        if not has_sparse:
+            client.update_collection(COLLECTION, sparse_vectors_config={"sparse": SparseVectorParams()})
+            cache_override = True
+            print("  Added sparse vector config to 'notes' — forcing full re-embed for migration", flush=True)
+    except Exception as e:
+        print(f"  warn: sparse migration failed: {e}", flush=True)
 
     md_files = [p for p in NOTES_DIR.rglob("*.md")
                 if ".obsidian" not in p.parts and ".git" not in p.parts]
