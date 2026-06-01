@@ -219,6 +219,19 @@ async def _api_webhook_log_handler(request: Request) -> JSONResponse:
     return JSONResponse({"log": _webhook_log})
 
 
+async def _api_logs_handler(request: Request) -> JSONResponse:
+    try:
+        n = int(request.query_params.get("lines", 200))
+    except ValueError:
+        n = 200
+    log_path = DATA_DIR / "cortex.log"
+    if not log_path.exists():
+        return JSONResponse({"lines": []})
+    text = log_path.read_text(errors="replace")
+    lines = text.splitlines()
+    return JSONResponse({"lines": lines[-n:]})
+
+
 def _start_watcher():
     if not os.path.isdir(NOTES_PATH):
         log.warning("[watcher] notes path %s not found, skipping", NOTES_PATH)
@@ -261,6 +274,7 @@ if __name__ == "__main__":
         Route("/api/repos-meta", _api_repos_meta_handler, methods=["GET"]),
         Route("/api/github/repos", _api_github_repos, methods=["GET"]),
         Route("/api/webhook-log", _api_webhook_log_handler, methods=["GET"]),
+        Route("/api/logs", _api_logs_handler, methods=["GET"]),
         Route("/api/graph/{repo:path}", _api_graph_handler, methods=["GET"]),
         Route("/.well-known/oauth-authorization-server", _oauth.well_known_as),
         Route("/.well-known/oauth-protected-resource", _oauth.well_known_resource),

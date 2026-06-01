@@ -202,6 +202,10 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <div class="section-title">Recent Webhooks</div>
                 <div id="webhook-log-wrap"><div class="empty">No webhooks received yet.</div></div>
             </div>
+            <div class="section">
+                <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">Server Logs<div style="display:flex;gap:0.5rem;align-items:center"><label style="font-size:0.75rem;color:var(--text-muted);cursor:pointer"><input type="checkbox" id="log-tail-toggle" style="margin-right:0.25rem">tail</label><button onclick="loadLogs()" class="secondary" style="padding:0.2rem 0.6rem;font-size:0.75rem">Refresh</button></div></div>
+                <pre id="log-output" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem;font-size:0.7rem;max-height:300px;overflow-y:auto;color:var(--text-muted);white-space:pre-wrap;word-break:break-all">No logs loaded.</pre>
+            </div>
         </div>
 
         <div id="graph-panel" class="panel">
@@ -310,7 +314,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
                 tab.classList.add('active');
                 document.getElementById(tab.dataset.tab + '-panel').classList.add('active');
-                if (tab.dataset.tab === 'admin') { loadStats(); loadWebhookLog(); }
+                if (tab.dataset.tab === 'admin') { loadStats(); loadWebhookLog(); loadLogs(); }
                 if (tab.dataset.tab === 'repos') loadRepos();
                 if (tab.dataset.tab === 'graph') loadGraphRepos();
             });
@@ -421,6 +425,20 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 wrap.innerHTML = '<table class="webhook-table"><thead><tr><th>Repo</th><th>Time</th><th>Status</th></tr></thead><tbody>' + log.map(e => '<tr><td>' + escapeHtml(e.repo) + '</td><td>' + timeAgo(e.ts) + '</td><td class="' + (e.status === 'triggered' || e.status === 'merged' ? 'wh-triggered' : 'wh-skipped') + '">' + escapeHtml(e.status) + '</td></tr>').join('') + '</tbody></table>';
             } catch (err) { wrap.innerHTML = '<div class="empty">Failed to load webhook log.</div>'; }
         }
+
+        let _logTailInterval = null;
+        async function loadLogs() {
+            const pre = document.getElementById('log-output');
+            try {
+                const data = await api('/api/logs?lines=200');
+                pre.textContent = data.lines.length ? data.lines.join('\n') : 'Log file empty.';
+                pre.scrollTop = pre.scrollHeight;
+            } catch (err) { pre.textContent = 'Failed to load logs.'; }
+        }
+        document.getElementById('log-tail-toggle').addEventListener('change', function() {
+            if (this.checked) { loadLogs(); _logTailInterval = setInterval(loadLogs, 5000); }
+            else { clearInterval(_logTailInterval); _logTailInterval = null; }
+        });
 
         let statusPoll = null;
         document.getElementById('reindex-all').addEventListener('click', function() { triggerReindex(true, true, '', this); });
