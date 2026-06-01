@@ -433,7 +433,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             const pre = document.getElementById('log-output');
             try {
                 const data = await api('/api/logs?lines=200');
-                pre.textContent = data.lines.length ? data.lines.join('\n') : 'Log file empty.';
+                pre.textContent = data.lines.length ? data.lines.join('\\n') : 'Log file empty.';
                 pre.scrollTop = pre.scrollHeight;
             } catch (err) { pre.textContent = 'Failed to load logs.'; }
         }
