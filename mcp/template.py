@@ -427,7 +427,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     let html = rows.map(([k, v]) => '<tr><td style="color:var(--text-muted);width:55%">' + escapeHtml(String(k)) + '</td><td>' + v + '</td></tr>').join('');
                     document.getElementById('graph-stats-body').innerHTML = html;
                     const hist = g.history || {};
-                    const histKeys = Object.keys(hist).sort().reverse();
+                    const histKeys = Object.keys(hist).sort((a,b)=>{ const p=v=>v.split('.').map(Number); const [a1,a2,a3]=(p(a)||[0,0,0]); const [b1,b2,b3]=(p(b)||[0,0,0]); return b1-a1||b2-a2||b3-a3; });
                     const btn = document.getElementById('history-btn');
                     if (histKeys.length) {
                         btn.style.display = '';
