@@ -19,7 +19,7 @@ Dashboard at `/` for search and admin operations.
 https://cortex.hyvitech.org/
 ```
 
-Auth handled by Authelia at NPM proxy level. No in-app auth required.
+Auth: built-in OAuth 2.0 (Bearer token). Login at `/authorize` with `ADMIN_PASSWORD`.
 
 **Features:**
 - Search tab: query notes/code, toggle collections
@@ -68,11 +68,13 @@ docker-compose.yml  # ollama + qdrant + cortex-mcp
 
 ## MCP tools
 
-- `search_notes(query, limit)` — semantic search over Obsidian notes
-- `search_code(query, limit)` — semantic search over source code
+- `search_notes(query, limit)` — semantic search over Obsidian notes + PPR wikilink augmentation
+- `search_code(query, limit)` — semantic search over source code + centrality re-ranking
+- `get_neighbors(file, repo)` — imports + imported-by for a file
+- `get_community(repo, community_id)` — all files in a Louvain cluster
 - `reindex(notes, code, repo)` — async, returns immediately
 - `reindex_status()` — check progress of last reindex
-- `get_stats()` — returns efficiency metrics
+- `get_stats(all?)` — efficiency metrics; `all=True` shows all persisted versions side-by-side
 - `get_onboarding(existing_content?)` — returns setup instructions + preferences; pass existing CLAUDE.md content to merge
 
 ## MCP prompts
