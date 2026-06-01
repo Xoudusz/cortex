@@ -13,6 +13,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelector, MatchValue, PointStruct, VectorParams
 
 from chunker import chunk_file, CODE_EXTS, SKIP_DIRS, REPOS_DIR
+from cache import load_cache, save_cache
 
 OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 QDRANT_URL   = os.environ.get("QDRANT_URL", "http://qdrant:6333")
@@ -154,12 +155,31 @@ def main():
                 and not any(s in p.parts for s in SKIP_DIRS)
             ]
 
+        if not incremental:
+            file_cache = load_cache("code")
+            if client.get_collection(COLLECTION).points_count == 0:
+                file_cache = {}
+            new_file_cache = dict(file_cache)
+            cached_files = 0
+        else:
+            file_cache = {}
+            new_file_cache = None
+            cached_files = 0
+
         total = 0
         file_point_ids: dict = {}
 
         for i, path in enumerate(code_files):
             if i % 10 == 0 and i > 0:
                 print(f"  {name}: {i}/{len(code_files)} files, {total} chunks so far...", flush=True)
+
+            if not incremental:
+                cache_key = f"{name}/{str(path.relative_to(repo_path))}"
+                mtime = path.stat().st_mtime
+                if file_cache.get(cache_key) == mtime:
+                    cached_files += 1
+                    continue
+
             points = []
             for chunk in chunk_file(path, name):
                 cid = int(hashlib.md5(
@@ -170,23 +190,29 @@ def main():
             if points:
                 client.upsert(COLLECTION, points)
                 total += len(points)
+                if not incremental:
+                    new_file_cache[cache_key] = mtime
 
-        print(f"  {name}: {total} chunks from {len(code_files)} files", flush=True)
+        if not incremental:
+            save_cache("code", new_file_cache)
+        embedded_count = len(code_files) - cached_files
+        print(f"  {name}: {total} chunks from {embedded_count} files ({cached_files} cached)", flush=True)
+
+        # For graph build: always use full file set from repo scan, not just re-embedded files.
+        # In full mode with cache hits, file_point_ids only has re-embedded files — using it
+        # would persist a partial graph.
+        all_code_file_paths = set(
+            str(p.relative_to(repo_path)) for p in code_files
+        ) if not incremental else set(
+            str(p.relative_to(repo_path))
+            for p in repo_path.rglob("*")
+            if p.is_file() and p.suffix in CODE_EXTS
+            and not any(s in p.parts for s in SKIP_DIRS)
+        )
 
         try:
             import graph as _graph
-            if incremental:
-                # Build from all repo files so the persisted graph stays complete.
-                # file_point_ids only has changed files; using it would clobber graph_{name}.json.
-                graph_files = set(
-                    str(p.relative_to(repo_path))
-                    for p in repo_path.rglob("*")
-                    if p.is_file() and p.suffix in CODE_EXTS
-                    and not any(s in p.parts for s in SKIP_DIRS)
-                )
-            else:
-                graph_files = set(file_point_ids.keys())
-            G = _graph.build_code_graph(repo_path, graph_files)
+            G = _graph.build_code_graph(repo_path, all_code_file_paths)
             if G is not None:
                 metadata = _graph.compute_code_metadata(G)
                 _graph.persist_code_graph(G, metadata, name)

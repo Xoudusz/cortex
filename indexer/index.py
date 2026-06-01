@@ -10,6 +10,8 @@ import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
+from cache import load_cache, save_cache
+
 NOTES_DIR   = Path(os.environ.get("NOTES_PATH", "/notes"))
 OLLAMA_URL  = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 QDRANT_URL  = os.environ.get("QDRANT_URL", "http://qdrant:6333")
@@ -95,8 +97,21 @@ def main():
     md_files = [p for p in NOTES_DIR.rglob("*.md")
                 if ".obsidian" not in p.parts and ".git" not in p.parts]
 
+    cache = load_cache("notes")
+    if client.get_collection(COLLECTION).points_count == 0:
+        cache = {}
+    new_cache = {}
     total = 0
+    cached = 0
+
     for path in md_files:
+        rel = str(path.relative_to(NOTES_DIR))
+        mtime = path.stat().st_mtime
+        if cache.get(rel) == mtime:
+            new_cache[rel] = mtime
+            cached += 1
+            continue
+
         chunks = chunk_markdown(path)
         points = [
             PointStruct(
@@ -110,9 +125,11 @@ def main():
         if points:
             client.upsert(COLLECTION, points)
             total += len(points)
-            print(f"  {path.relative_to(NOTES_DIR)}: {len(points)} chunk(s)")
+            print(f"  {rel}: {len(points)} chunk(s)", flush=True)
+        new_cache[rel] = mtime
 
-    print(f"\nDone. {total} chunks indexed into '{COLLECTION}'.")
+    save_cache("notes", new_cache)
+    print(f"\nDone. {total} chunks indexed, {cached}/{len(md_files)} files cached (skipped).")
 
     # Build wikilink graph for PPR augmentation in search_notes
     try:
