@@ -726,7 +726,9 @@ async def _api_search_handler(request: Request):
     return await api_search(request, QDRANT_URL, embed)
 
 async def _api_status_handler(request: Request):
-    return await api_status(request, _reindex_state)
+    with _job_lock:
+        queue_snapshot = [{"notes": j["notes"], "code": j["code"], "repo": j.get("repo", "")} for j in _job_queue]
+    return await api_status(request, _reindex_state, queue_snapshot)
 
 async def _api_reindex_handler(request: Request):
     try:

@@ -202,6 +202,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     <button id="reindex-notes" class="secondary">Notes Only</button>
                     <button id="reindex-code" class="secondary">Code Only</button>
                 </div>
+                <div id="queue-list" style="display:none;font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem;padding:0.3rem 0.5rem;background:var(--accent-dim);border-radius:4px"></div>
                 <div id="reindex-status" class="status-log">No reindex running.</div>
             </div>
             <div class="section">
@@ -429,15 +430,45 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         }
 
         let statusPoll = null;
-        document.getElementById('reindex-all').addEventListener('click', () => triggerReindex(true, true));
-        document.getElementById('reindex-notes').addEventListener('click', () => triggerReindex(true, false));
-        document.getElementById('reindex-code').addEventListener('click', () => triggerReindex(false, true));
+        document.getElementById('reindex-all').addEventListener('click', function() { triggerReindex(true, true, '', this); });
+        document.getElementById('reindex-notes').addEventListener('click', function() { triggerReindex(true, false, '', this); });
+        document.getElementById('reindex-code').addEventListener('click', function() { triggerReindex(false, true, '', this); });
 
-        async function triggerReindex(notes, code, repo) {
+        async function triggerReindex(notes, code, repo, btn) {
+            if (btn) { btn.disabled = true; btn._origText = btn.textContent; btn.textContent += ' (queued)'; }
             try {
-                const data = await api('/api/reindex', { method: 'POST', body: JSON.stringify({ notes, code, repo: repo || '' }) });
-                if (data.status === 'started' || data.status === 'already_running') pollStatus();
-            } catch (err) { document.getElementById('reindex-status').textContent = 'Error: ' + err.message; }
+                await api('/api/reindex', { method: 'POST', body: JSON.stringify({ notes, code, repo: repo || '' }) });
+                pollStatus();
+            } catch (err) {
+                document.getElementById('reindex-status').textContent = 'Error: ' + err.message;
+                if (btn) { btn.disabled = false; btn.textContent = btn._origText; }
+            }
+        }
+
+        function updateQueueDisplay(queue) {
+            const el = document.getElementById('queue-list');
+            if (!queue || !queue.length) { el.style.display = 'none'; return; }
+            const labels = queue.map(j => {
+                if (j.notes && j.code) return j.repo ? 'All (' + j.repo + ')' : 'All';
+                if (j.notes) return 'Notes';
+                if (j.code) return j.repo ? 'Code (' + j.repo + ')' : 'Code';
+                return '?';
+            });
+            el.textContent = 'Queued: ' + labels.join(' → ');
+            el.style.display = '';
+        }
+
+        function syncButtonStates(running, queue) {
+            const all = document.getElementById('reindex-all');
+            const notes = document.getElementById('reindex-notes');
+            const code = document.getElementById('reindex-code');
+            const activeJobs = [...(running ? [{ notes: true, code: true }] : []), ...(queue || [])];
+            const notesActive = activeJobs.some(j => j.notes);
+            const codeActive = activeJobs.some(j => j.code);
+            [all, notes, code].forEach(b => { b.disabled = false; if (b._origText) { b.textContent = b._origText; delete b._origText; } });
+            if (notesActive && codeActive) { all.disabled = true; }
+            if (notesActive) { notes.disabled = true; }
+            if (codeActive) { code.disabled = true; }
         }
 
         async function pollStatus() {
@@ -453,7 +484,11 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     statusDiv.textContent = text;
                     statusDiv.scrollTop = statusDiv.scrollHeight;
                     statusDot.classList.toggle('active', !!data.running);
-                    if (data.done && !data.running) { clearInterval(statusPoll); statusPoll = null; statusDiv.classList.remove('status-running'); loadStats(); loadRepoFilter(); }
+                    updateQueueDisplay(data.queue);
+                    syncButtonStates(data.running, data.queue);
+                    if (data.done && !data.running && !(data.queue && data.queue.length)) {
+                        clearInterval(statusPoll); statusPoll = null; statusDiv.classList.remove('status-running'); loadStats(); loadRepoFilter();
+                    }
                 } catch (err) { statusDiv.textContent = 'Error polling status: ' + err.message; }
             };
             await update();
@@ -461,7 +496,9 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         }
 
         api('/api/status').then(data => {
-            if (data.running) pollStatus();
+            updateQueueDisplay(data.queue);
+            syncButtonStates(data.running, data.queue);
+            if (data.running || (data.queue && data.queue.length)) pollStatus();
             else if (data.done) { let text = 'Last run: done (' + Math.round(data.elapsed_seconds) + 's)' + NL + NL; text += (data.output || []).join(NL); document.getElementById('reindex-status').textContent = text; }
         }).catch(() => {});
 
@@ -707,13 +744,14 @@ async def api_search(request: Request, qdrant_url: str, embed_fn) -> JSONRespons
     return JSONResponse(result)
 
 
-async def api_status(request: Request, reindex_state: dict) -> JSONResponse:
+async def api_status(request: Request, reindex_state: dict, job_queue: list = None) -> JSONResponse:
     import time
     s = reindex_state
+    base = {"running": False, "elapsed_seconds": 0, "output": [], "error": None, "done": False, "queue": job_queue or []}
     if s["started_at"] is None:
-        return JSONResponse({"running": False, "elapsed_seconds": 0, "output": [], "error": None, "done": False})
+        return JSONResponse(base)
     elapsed = time.time() - s["started_at"]
-    return JSONResponse({"running": s["running"], "elapsed_seconds": round(elapsed, 1), "output": s["output"][-100:], "error": s["error"], "done": s["done"]})
+    return JSONResponse({**base, "running": s["running"], "elapsed_seconds": round(elapsed, 1), "output": s["output"][-100:], "error": s["error"], "done": s["done"]})
 
 
 async def api_reindex(request: Request, reindex_lock, reindex_state: dict, run_reindex_fn) -> JSONResponse:
