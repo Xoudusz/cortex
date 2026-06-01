@@ -129,14 +129,16 @@ def main():
 
     coll_info = client.get_collection(COLLECTION)
     sparse_migration = False
+    sparse_available = False
     try:
         has_sparse = bool(getattr(coll_info.config.params, 'sparse_vectors_config', None))
         if not has_sparse:
             client.update_collection(COLLECTION, sparse_vectors_config={"sparse": SparseVectorParams()})
             sparse_migration = True
             print(f"  Added sparse vector config to '{COLLECTION}' — forcing full re-embed for migration", flush=True)
+        sparse_available = True
     except Exception as e:
-        print(f"  warn: sparse migration failed: {e}", flush=True)
+        print(f"  warn: sparse vectors unavailable: {e}", flush=True)
 
     from chunker import _TS_AVAILABLE
     print(f"Chunking mode: {'tree-sitter' if _TS_AVAILABLE else 'sliding-window (fallback)'}", flush=True)
@@ -208,12 +210,13 @@ def main():
                 cid = int(hashlib.md5(
                     f"{chunk['repo']}:{chunk['file']}:{chunk['start_line']}".encode()
                 ).hexdigest()[:8], 16)
-                idx, vals = sparse_embed(chunk["text"])
-                points.append(PointStruct(
-                    id=cid,
-                    vector={"": embed(chunk["text"]), "sparse": SparseVector(indices=idx, values=vals)},
-                    payload=chunk,
-                ))
+                dense = embed(chunk["text"])
+                if sparse_available:
+                    idx, vals = sparse_embed(chunk["text"])
+                    vec = {"": dense, "sparse": SparseVector(indices=idx, values=vals)}
+                else:
+                    vec = dense
+                points.append(PointStruct(id=cid, vector=vec, payload=chunk))
                 file_point_ids.setdefault(chunk["file"], []).append(cid)
             if points:
                 client.upsert(COLLECTION, points)

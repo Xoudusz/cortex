@@ -36,16 +36,19 @@ async def api_search(request: Request, qdrant_url: str, embed_fn, sparse_embed_f
         try:
             if sparse:
                 idx, vals = sparse
-                points = client.query_points(
-                    "notes",
-                    prefetch=[
-                        Prefetch(query=vector, using=None, limit=limit * 2),
-                        Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2),
-                    ],
-                    query=Fusion.RRF,
-                    limit=limit,
-                    with_payload=True,
-                ).points
+                try:
+                    points = client.query_points(
+                        "notes",
+                        prefetch=[
+                            Prefetch(query=vector, using=None, limit=limit * 2),
+                            Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2),
+                        ],
+                        query=Fusion.RRF,
+                        limit=limit,
+                        with_payload=True,
+                    ).points
+                except Exception:
+                    points = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
             else:
                 points = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
             result["notes"] = [{"file": p.payload.get("file", ""), "heading": p.payload.get("heading", ""), "text": p.payload.get("text", ""), "tags": p.payload.get("tags", []), "score": round(p.score, 4)} for p in points]
@@ -56,16 +59,19 @@ async def api_search(request: Request, qdrant_url: str, embed_fn, sparse_embed_f
             q_filter = Filter(must=[FieldCondition(key="repo", match=MatchValue(value=repo_filter))]) if repo_filter else None
             if sparse:
                 idx, vals = sparse
-                points = client.query_points(
-                    "code",
-                    prefetch=[
-                        Prefetch(query=vector, using=None, limit=limit * 2, filter=q_filter),
-                        Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2, filter=q_filter),
-                    ],
-                    query=Fusion.RRF,
-                    limit=limit,
-                    with_payload=True,
-                ).points
+                try:
+                    points = client.query_points(
+                        "code",
+                        prefetch=[
+                            Prefetch(query=vector, using=None, limit=limit * 2, filter=q_filter),
+                            Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2, filter=q_filter),
+                        ],
+                        query=Fusion.RRF,
+                        limit=limit,
+                        with_payload=True,
+                    ).points
+                except Exception:
+                    points = client.query_points("code", query=vector, limit=limit, with_payload=True, query_filter=q_filter).points
             else:
                 points = client.query_points("code", query=vector, limit=limit, with_payload=True, query_filter=q_filter).points
             result["code"] = [{"repo": p.payload.get("repo", ""), "file": p.payload.get("file", ""), "start_line": p.payload.get("start_line", 0), "end_line": p.payload.get("end_line", 0), "language": p.payload.get("language", ""), "text": p.payload.get("text", ""), "github_url": p.payload.get("github_url", ""), "score": round(p.score, 4)} for p in points]

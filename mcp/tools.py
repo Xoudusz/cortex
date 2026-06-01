@@ -72,17 +72,20 @@ def search_notes(query: str, limit: int = 5) -> str:
     _stats["search_notes_calls"] += 1
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
-    idx, vals = sparse_embed(query)
-    results = client.query_points(
-        "notes",
-        prefetch=[
-            Prefetch(query=vector, using=None, limit=limit * 2),
-            Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2),
-        ],
-        query=Fusion.RRF,
-        limit=limit,
-        with_payload=True,
-    ).points
+    try:
+        idx, vals = sparse_embed(query)
+        results = client.query_points(
+            "notes",
+            prefetch=[
+                Prefetch(query=vector, using=None, limit=limit * 2),
+                Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2),
+            ],
+            query=Fusion.RRF,
+            limit=limit,
+            with_payload=True,
+        ).points
+    except Exception:
+        results = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
     if not results:
         return "No results found."
     _stats["total_results_notes"] += len(results)
@@ -124,18 +127,21 @@ def search_code(query: str, limit: int = 5) -> str:
     _stats["search_code_calls"] += 1
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
-    idx, vals = sparse_embed(query)
     fetch_limit = min(limit * 3, 50)
-    results = client.query_points(
-        "code",
-        prefetch=[
-            Prefetch(query=vector, using=None, limit=fetch_limit),
-            Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=fetch_limit),
-        ],
-        query=Fusion.RRF,
-        limit=fetch_limit,
-        with_payload=True,
-    ).points
+    try:
+        idx, vals = sparse_embed(query)
+        results = client.query_points(
+            "code",
+            prefetch=[
+                Prefetch(query=vector, using=None, limit=fetch_limit),
+                Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=fetch_limit),
+            ],
+            query=Fusion.RRF,
+            limit=fetch_limit,
+            with_payload=True,
+        ).points
+    except Exception:
+        results = client.query_points("code", query=vector, limit=fetch_limit, with_payload=True).points
     if not results:
         return "No results found."
     scored = []

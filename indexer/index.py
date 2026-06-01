@@ -108,14 +108,16 @@ def main():
 
     coll_info = client.get_collection(COLLECTION)
     cache_override = False
+    sparse_available = False
     try:
         has_sparse = bool(getattr(coll_info.config.params, 'sparse_vectors_config', None))
         if not has_sparse:
             client.update_collection(COLLECTION, sparse_vectors_config={"sparse": SparseVectorParams()})
             cache_override = True
             print("  Added sparse vector config to 'notes' — forcing full re-embed for migration", flush=True)
+        sparse_available = True
     except Exception as e:
-        print(f"  warn: sparse migration failed: {e}", flush=True)
+        print(f"  warn: sparse vectors unavailable: {e}", flush=True)
 
     md_files = [p for p in NOTES_DIR.rglob("*.md")
                 if ".obsidian" not in p.parts and ".git" not in p.parts]
@@ -138,10 +140,15 @@ def main():
         chunks = chunk_markdown(path)
         points = []
         for c in chunks:
-            idx, vals = sparse_embed(c["text"])
+            dense = embed(c["text"])
+            if sparse_available:
+                idx, vals = sparse_embed(c["text"])
+                vec = {"": dense, "sparse": SparseVector(indices=idx, values=vals)}
+            else:
+                vec = dense
             points.append(PointStruct(
                 id=chunk_id(c["file"], c["heading"]),
-                vector={"": embed(c["text"]), "sparse": SparseVector(indices=idx, values=vals)},
+                vector=vec,
                 payload={"file": c["file"], "heading": c["heading"], "text": c["text"],
                          "tags": c["tags"], "modified_at": c["modified_at"]},
             ))
