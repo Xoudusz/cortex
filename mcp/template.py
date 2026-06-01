@@ -423,6 +423,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                         ['PPR fires', g.ppr_fires + ' (' + pprRate + ' of calls)'],
                         ['PPR results added', g.ppr_results_added],
                         ['graph cache hit rate', cacheRate + ' (' + g.graph_cache_hits + '/' + total + ')'],
+                        ['embed cache skipped', 'notes=' + (g.embed_cache_notes || 0) + '  code=' + (g.embed_cache_code || 0)],
                     ];
                     let html = rows.map(([k, v]) => '<tr><td style="color:var(--text-muted);width:55%">' + escapeHtml(String(k)) + '</td><td>' + v + '</td></tr>').join('');
                     document.getElementById('graph-stats-body').innerHTML = html;
