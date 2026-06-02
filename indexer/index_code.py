@@ -128,24 +128,12 @@ def main():
         )
         print(f"Created collection '{COLLECTION}' with sparse vector support", flush=True)
 
-    coll_info = client.get_collection(COLLECTION)
-    sparse_migration = False
     sparse_available = False
     try:
-        svc = getattr(coll_info.config.params, 'sparse_vectors_config', None) or {}
-        if "sparse" not in svc:
-            print(f"  Recreating '{COLLECTION}' collection with sparse vector support (one-time migration)...", flush=True)
-            client.delete_collection(COLLECTION)
-            client.create_collection(
-                COLLECTION,
-                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
-                sparse_vectors_config={"sparse": SparseVectorParams()},
-            )
-            sparse_migration = True
-            print(f"  Collection recreated — forcing full re-embed", flush=True)
+        sparse_embed("warmup")
         sparse_available = True
     except Exception as e:
-        print(f"  warn: sparse migration failed: {e}", flush=True)
+        print(f"  warn: sparse vectors unavailable (dense-only fallback): {e}", flush=True)
 
     from chunker import _TS_AVAILABLE
     print(f"Chunking mode: {'tree-sitter' if _TS_AVAILABLE else 'sliding-window (fallback)'}", flush=True)
@@ -189,7 +177,7 @@ def main():
 
         if not incremental:
             file_cache = load_cache("code")
-            if sparse_migration or client.get_collection(COLLECTION).points_count == 0:
+            if client.get_collection(COLLECTION).points_count == 0:
                 file_cache = {}
             new_file_cache = dict(file_cache)
             cached_files = 0

@@ -109,30 +109,18 @@ def main():
         )
         print(f"Created collection '{COLLECTION}' with sparse vector support")
 
-    coll_info = client.get_collection(COLLECTION)
-    cache_override = False
     sparse_available = False
     try:
-        svc = getattr(coll_info.config.params, 'sparse_vectors_config', None) or {}
-        if "sparse" not in svc:
-            print("  Recreating 'notes' collection with sparse vector support (one-time migration)...", flush=True)
-            client.delete_collection(COLLECTION)
-            client.create_collection(
-                COLLECTION,
-                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
-                sparse_vectors_config={"sparse": SparseVectorParams()},
-            )
-            cache_override = True
-            print("  Collection recreated — forcing full re-embed", flush=True)
+        sparse_embed("warmup")
         sparse_available = True
     except Exception as e:
-        print(f"  warn: sparse migration failed: {e}", flush=True)
+        print(f"  warn: sparse vectors unavailable (dense-only fallback): {e}", flush=True)
 
     md_files = [p for p in NOTES_DIR.rglob("*.md")
                 if ".obsidian" not in p.parts and ".git" not in p.parts]
 
     cache = load_cache("notes")
-    if cache_override or client.get_collection(COLLECTION).points_count == 0:
+    if client.get_collection(COLLECTION).points_count == 0:
         cache = {}
     new_cache = {}
     total = 0
