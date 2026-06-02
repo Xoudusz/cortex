@@ -4,12 +4,13 @@
 import logging
 import os
 import threading
+import time
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from config import NOTES_PATH, WATCH_DEBOUNCE
-from reindex import _enqueue
+from reindex import _enqueue, _reindex_state
 
 log = logging.getLogger("cortex")
 
@@ -37,6 +38,10 @@ class _NotesHandler(FileSystemEventHandler):
 
     def _on_debounce(self):
         """Fire the notes reindex job after the debounce window has elapsed."""
+        nf = _reindex_state.get("notes_finished_at", 0)
+        if nf and time.time() - nf < WATCH_DEBOUNCE + 10:
+            log.info("[watcher] suppressed — notes reindex finished %.0fs ago", time.time() - nf)
+            return
         log.info("[watcher] debounce elapsed — queuing notes reindex")
         _enqueue(notes=True, code=False)
 

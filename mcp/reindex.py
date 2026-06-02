@@ -21,6 +21,7 @@ _worker_event = threading.Event()
 _reindex_state: dict = {
     "running": False, "started_at": None, "finished_at": None, "output": [],
     "error": None, "done": False, "queue_depth": 0, "current_job": None,
+    "notes_finished_at": 0,
 }
 
 
@@ -61,6 +62,7 @@ def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=No
     try:
         if notes:
             _stream(["/app/index.py"], "notes", 300)
+            _reindex_state["notes_finished_at"] = time.time()
         if code:
             cmd = ["/app/index_code.py"]
             if repo:
