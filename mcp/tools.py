@@ -12,7 +12,7 @@ from qdrant_client.models import Prefetch, Fusion, SparseVector
 
 from config import HOST, PORT, QDRANT_URL, DATA_DIR, VERSION, embed, sparse_embed
 from state import _stats, _get_code_graph_meta, _load_all_stats
-from onboarding import ONBOARDING_TEMPLATE, _merge_onboarding
+from onboarding import PROJECT_CLAUDE_MD_TEMPLATE, CORTEX_MERGE_SECTION, _merge_onboarding
 from reindex import _enqueue, get_status
 
 log = logging.getLogger("cortex")
@@ -374,34 +374,42 @@ def get_community(repo: str, community_id: int) -> str:
 
 @mcp.tool()
 def get_onboarding(existing_content: str = "") -> str:
-    """Get onboarding instructions for CLAUDE.md."""
+    """Get a project CLAUDE.md template, or merge Cortex section into existing content.
+
+    No args: returns full PROJECT_CLAUDE_MD_TEMPLATE with placeholder sections
+    (Stack, Commands, Structure, Conventions, Don't) that Claude should fill in
+    by examining the actual codebase. Cortex and Preferences sections are pre-filled.
+
+    With existing_content: appends Cortex + Preferences sections if not already present.
+    """
     if existing_content.strip():
         return _merge_onboarding(existing_content)
-    return ONBOARDING_TEMPLATE
+    return PROJECT_CLAUDE_MD_TEMPLATE
 
 
 @mcp.prompt()
 def onboarding() -> str:
     """Set up Cortex and user preferences for this project."""
-    return f"""Set up Cortex for this project. Execute this checklist:
+    return """Set up Cortex for this project. Execute this checklist in order:
 
 ## 1. CLAUDE.md
-Read existing CLAUDE.md (if any). Merge with this config, avoiding duplicates:
-
-{ONBOARDING_TEMPLATE}
-
-Write merged result to CLAUDE.md.
+- Read existing CLAUDE.md if present; pass its content to `get_onboarding(existing_content)`.
+- If no CLAUDE.md exists, call `get_onboarding()` with no args.
+- Write the result to CLAUDE.md.
+- Fill in the placeholder sections (Stack, Commands, Structure, Conventions, Don't)
+  by examining the actual codebase (package.json / requirements.txt / Cargo.toml / go.mod,
+  directory listing, existing README, etc.).
 
 ## 2. Git Config
 ```bash
 rtk git config user.name "Xoudusz" && rtk git config user.email "da@w23.at"
 ```
 
-## 3. Check RTK
-Run `rtk --version`. If fails: `cargo install rtk`
+## 3. RTK
+Run `rtk --version`. If command not found: `cargo install rtk`
 
-## 4. Check Caveman Skill
-Run `claude skill list`. If missing: `claude skill add caveman:caveman`
+## 4. Caveman Skill
+Run `claude skill list`. If `caveman:caveman` missing: `claude skill add caveman:caveman`
 
 ## 5. Verify Cortex
-Call `search_notes("test query")`. Report status of each step when done."""
+Call `search_notes("test")`. Report pass/fail for each step above."""
