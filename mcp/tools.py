@@ -104,7 +104,9 @@ def search_notes(query: str, limit: int = 5) -> str:
     ppr_block = _augment_with_ppr(matched_files, matched_scores, DATA_DIR / "graph_notes.json")
     if ppr_block:
         parts.append(ppr_block)
-    return "\n\n---\n\n".join(parts)
+    out = "\n\n---\n\n".join(parts)
+    _stats["context_tokens_notes"] += len(out) // 4
+    return out
 
 
 @mcp.tool()
@@ -181,7 +183,9 @@ def search_code(query: str, limit: int = 5) -> str:
             header += f" · community: {community}"
         url = p.get("github_url", "")
         parts.append(f"{header}\n{url}\n\n{p['text']}" if url else f"{header}\n\n{p['text']}")
-    return "\n\n---\n\n".join(parts)
+    out = "\n\n---\n\n".join(parts)
+    _stats["context_tokens_code"] += len(out) // 4
+    return out
 
 
 @mcp.tool()
@@ -267,7 +271,12 @@ def _fmt_version_stats(v: str, stats: dict, current: bool = False) -> str:
             f" no_match={_ppr_diag['ppr_no_matches']} below_threshold={_ppr_diag['ppr_below_threshold']}"
             f" exception={_ppr_diag['ppr_exception']}"
         )
+    ctx_notes = stats.get("context_tokens_notes", 0)
+    ctx_code = stats.get("context_tokens_code", 0)
+    ctx_total = ctx_notes + ctx_code
+    def _k(n): return f"{n // 1000}k" if n >= 1000 else str(n)
     lines += [
+        f"  context injected: notes={_k(ctx_notes)} code={_k(ctx_code)}  total={_k(ctx_total)} tokens (~chars/4 est.)",
         f"  graph cache: {cache_rate} ({stats.get('graph_cache_hits', 0)}/{total_cache})",
         f"  embed cache skipped: notes={stats.get('embed_cache_notes', 0)} code={stats.get('embed_cache_code', 0)}",
         f"  reindexes: {stats.get('reindex_count', 0)}",

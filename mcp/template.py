@@ -424,6 +424,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                         ['PPR results added', g.ppr_results_added],
                         ['graph cache hit rate', cacheRate + ' (' + g.graph_cache_hits + '/' + total + ')'],
                         ['embed cache skipped', 'notes=' + (g.embed_cache_notes || 0) + '  code=' + (g.embed_cache_code || 0)],
+                        ['context injected', (((g.context_tokens_notes||0) + (g.context_tokens_code||0)) / 1000).toFixed(1) + 'k tokens  (notes=' + Math.round((g.context_tokens_notes||0)/1000) + 'k  code=' + Math.round((g.context_tokens_code||0)/1000) + 'k)'],
                     ];
                     let html = rows.map(([k, v]) => '<tr><td style="color:var(--text-muted);width:55%">' + escapeHtml(String(k)) + '</td><td>' + v + '</td></tr>').join('');
                     document.getElementById('graph-stats-body').innerHTML = html;

@@ -34,6 +34,8 @@ def _default_stats() -> dict:
         "embed_cache_code": 0,
         "total_results_code": 0,
         "total_results_notes": 0,
+        "context_tokens_notes": 0,
+        "context_tokens_code": 0,
         "ppr_nx_missing": 0,
         "ppr_graph_missing": 0,
         "ppr_no_matches": 0,
