@@ -2,6 +2,7 @@
 """Index Obsidian notes into Qdrant via Ollama embeddings."""
 
 import hashlib
+import json
 import os
 import re
 from pathlib import Path
@@ -113,18 +114,23 @@ def main():
     cache_override = False
     sparse_available = False
     try:
-        has_sparse = bool(getattr(coll_info.config.params, 'sparse_vectors_config', None))
-        if not has_sparse:
-            # update_collection can't add new sparse config — must recreate
-            print("  Recreating 'notes' collection with sparse vector support (one-time migration)...", flush=True)
-            client.delete_collection(COLLECTION)
-            client.create_collection(
-                COLLECTION,
-                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
-                sparse_vectors_config={"sparse": SparseVectorParams()},
-            )
-            cache_override = True
-            print("  Collection recreated — forcing full re-embed", flush=True)
+        flag = Path("/app/data/sparse_migrated.json")
+        already = json.loads(flag.read_text()).get(COLLECTION, False) if flag.exists() else False
+        if not already:
+            has_sparse = bool(getattr(coll_info.config.params, 'sparse_vectors_config', None))
+            if not has_sparse:
+                print("  Recreating 'notes' collection with sparse vector support (one-time migration)...", flush=True)
+                client.delete_collection(COLLECTION)
+                client.create_collection(
+                    COLLECTION,
+                    vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+                    sparse_vectors_config={"sparse": SparseVectorParams()},
+                )
+                cache_override = True
+                print("  Collection recreated — forcing full re-embed", flush=True)
+            d = json.loads(flag.read_text()) if flag.exists() else {}
+            d[COLLECTION] = True
+            flag.write_text(json.dumps(d))
         sparse_available = True
     except Exception as e:
         print(f"  warn: sparse migration failed: {e}", flush=True)
