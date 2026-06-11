@@ -53,6 +53,7 @@ def install_cmd() -> None:
     result = subprocess.run(
         ["claude", "mcp", "add", "cortex", "--transport", "stdio", "cortex", "serve"],
         capture_output=True, text=True,
+        shell=(sys.platform == "win32"),
     )
     if result.returncode == 0:
         click.echo("Done. cortex is ready — restart Claude Code to activate.")

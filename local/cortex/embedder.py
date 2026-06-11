@@ -1,5 +1,9 @@
 """fastembed-based dense + sparse embeddings for cortex local mode."""
 
+import os
+
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
 from .config import EMBED_MODEL
 
 _dense = None
