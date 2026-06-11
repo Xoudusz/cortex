@@ -10,7 +10,7 @@ from qdrant_client.models import (
     MatchValue, PointStruct, SparseVector, SparseVectorParams, VectorParams,
 )
 
-from .config import QDRANT_PATH, DATA_DIR, CACHE_FILE, VECTOR_SIZE, PATHS_FILE
+from .config import qdrant_path, data_dir, cache_file, VECTOR_SIZE, migrate_legacy
 from .embedder import embed, sparse_embed
 from .core.chunker import chunk_file, CODE_EXTS, SKIP_DIRS
 from .core.cache import load_cache, save_cache
@@ -18,7 +18,10 @@ from .core import graph as _graph
 
 
 def _qdrant() -> QdrantClient:
-    return QdrantClient(path=QDRANT_PATH)
+    migrate_legacy()
+    d = data_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    return QdrantClient(path=qdrant_path())
 
 
 def _ensure_collection(client: QdrantClient, name: str) -> bool:
@@ -116,7 +119,7 @@ def index_notes(notes_dir: Path) -> int:
     md_files = [p for p in notes_dir.rglob("*.md")
                 if ".obsidian" not in p.parts and ".git" not in p.parts]
 
-    cache = load_cache("notes", CACHE_FILE)
+    cache = load_cache("notes", cache_file())
     if client.get_collection("notes").points_count == 0:
         cache = {}
     new_cache: dict = {}
@@ -139,12 +142,12 @@ def index_notes(notes_dir: Path) -> int:
             print(f"  {rel}: {len(points)} chunk(s)", flush=True)
         new_cache[rel] = mtime
 
-    save_cache("notes", new_cache, CACHE_FILE)
+    save_cache("notes", new_cache, cache_file())
     print(f"Done. {total} chunks indexed, {cached}/{len(md_files)} files cached.", flush=True)
 
     try:
         G = _graph.build_notes_graph(notes_dir)
-        _graph.persist_notes_graph(G, DATA_DIR)
+        _graph.persist_notes_graph(G, data_dir())
     except Exception as e:
         print(f"  notes graph failed: {e}")
 
@@ -170,7 +173,7 @@ def index_code(code_dir: Path) -> int:
         and not any(s in p.parts for s in SKIP_DIRS)
     ]
 
-    cache = load_cache("code", CACHE_FILE)
+    cache = load_cache("code", cache_file())
     if client.get_collection("code").points_count == 0:
         cache = {}
     new_cache = dict(cache)
@@ -198,7 +201,7 @@ def index_code(code_dir: Path) -> int:
             total += len(points)
             new_cache[cache_key] = mtime
 
-    save_cache("code", new_cache, CACHE_FILE)
+    save_cache("code", new_cache, cache_file())
     print(f"  {repo_name}: {total} chunks from {len(code_files) - cached} files ({cached} cached)", flush=True)
 
     all_files = {
@@ -208,7 +211,7 @@ def index_code(code_dir: Path) -> int:
         G = _graph.build_code_graph(code_dir, all_files)
         if G is not None:
             metadata = _graph.compute_code_metadata(G)
-            _graph.persist_code_graph(G, metadata, repo_name, DATA_DIR)
+            _graph.persist_code_graph(G, metadata, repo_name, data_dir())
             for file_rel, meta in metadata.items():
                 pids = file_point_ids.get(file_rel, [])
                 if pids:
@@ -233,7 +236,7 @@ def index_code(code_dir: Path) -> int:
 def index_path(path: Path) -> None:
     """Index a path — .md files as notes, code files as code."""
     path = path.resolve()
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    data_dir().mkdir(parents=True, exist_ok=True)
 
     md_files = list(path.rglob("*.md"))
     code_files = [p for p in path.rglob("*")

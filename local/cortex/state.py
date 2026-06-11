@@ -4,10 +4,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import DATA_DIR, STATS_FILE, VERSION
+from .config import data_dir, stats_file, VERSION
 
 _graph_cache: dict = {}
-
 _stats: dict = {}
 
 
@@ -35,8 +34,9 @@ def _default_stats() -> dict:
 def _load_stats() -> dict:
     defaults = _default_stats()
     try:
-        if STATS_FILE.exists():
-            data = json.loads(STATS_FILE.read_text())
+        sf = stats_file()
+        if sf.exists():
+            data = json.loads(sf.read_text())
             saved = data.get("versions", {}).get(VERSION, {})
             if saved:
                 return {**defaults, **saved}
@@ -47,12 +47,13 @@ def _load_stats() -> dict:
 
 def save_stats() -> None:
     try:
+        sf = stats_file()
         existing: dict = {}
-        if STATS_FILE.exists():
-            existing = json.loads(STATS_FILE.read_text()).get("versions", {})
+        if sf.exists():
+            existing = json.loads(sf.read_text()).get("versions", {})
         existing[VERSION] = {**_stats, "last_saved": datetime.now(timezone.utc).isoformat()}
-        STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        STATS_FILE.write_text(json.dumps({"versions": existing}, indent=2))
+        sf.parent.mkdir(parents=True, exist_ok=True)
+        sf.write_text(json.dumps({"versions": existing}, indent=2))
     except Exception:
         pass
 
@@ -61,7 +62,7 @@ def get_graph_meta(repo_name: str) -> dict:
     if repo_name in _graph_cache:
         _stats["graph_cache_hits"] += 1
         return _graph_cache[repo_name]
-    path = DATA_DIR / f"graph_{repo_name}.json"
+    path = data_dir() / f"graph_{repo_name}.json"
     if not path.exists():
         _stats["graph_cache_misses"] += 1
         return {}

@@ -30,6 +30,12 @@ DATA_DIR       = Path(REPOS_CONFIG).parent
 VERSION        = (Path("/app/VERSION").read_text().strip()
                   if Path("/app/VERSION").exists() else "dev")
 STATS_FILE     = DATA_DIR / "stats.json"
+WORKSPACE      = os.environ.get("CORTEX_WORKSPACE", "default")
+
+
+def collection_name(base: str, workspace: str = "") -> str:
+    ws = workspace or WORKSPACE
+    return base if ws == "default" else f"{ws}_{base}"
 
 
 def embed(text: str) -> list:

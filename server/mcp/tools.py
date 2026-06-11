@@ -10,8 +10,8 @@ from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
 from qdrant_client.models import Prefetch, Fusion, SparseVector
 
-from config import HOST, PORT, QDRANT_URL, DATA_DIR, VERSION, embed, sparse_embed
-from state import _stats, _get_code_graph_meta, _load_all_stats
+from config import HOST, PORT, QDRANT_URL, DATA_DIR, VERSION, embed, sparse_embed, collection_name
+from state import _stats, _get_code_graph_meta, _load_all_stats, get_active_workspace, set_active_workspace, _workspace_data_dir
 from onboarding import PROJECT_CLAUDE_MD_TEMPLATE, CORTEX_MERGE_SECTION, _merge_onboarding
 from reindex import _enqueue, get_status
 from repos import _load_repos
@@ -89,12 +89,14 @@ def search_notes(query: str, limit: int = 5) -> str:
     Prefer this over asking the user to explain context they may have already written down.
     """
     _stats["search_notes_calls"] += 1
+    ws = get_active_workspace()
+    coll = collection_name("notes", ws)
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
     try:
         idx, vals = sparse_embed(query)
         results = client.query_points(
-            "notes",
+            coll,
             prefetch=[
                 Prefetch(query=vector, using=None, limit=limit * 2),
                 Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2),
@@ -104,7 +106,7 @@ def search_notes(query: str, limit: int = 5) -> str:
             with_payload=True,
         ).points
     except Exception:
-        results = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
+        results = client.query_points(coll, query=vector, limit=limit, with_payload=True).points
     if not results:
         return "No results found."
     _stats["total_results_notes"] += len(results)
@@ -120,7 +122,7 @@ def search_notes(query: str, limit: int = 5) -> str:
         )
         matched_files.append(p.get("file", ""))
         matched_scores.append(r.score)
-    ppr_block = _augment_with_ppr(matched_files, matched_scores, DATA_DIR / "graph_notes.json")
+    ppr_block = _augment_with_ppr(matched_files, matched_scores, _workspace_data_dir(ws) / "graph_notes.json")
     if ppr_block:
         parts.append(ppr_block)
     out = "\n\n---\n\n".join(parts)
@@ -131,13 +133,14 @@ def search_notes(query: str, limit: int = 5) -> str:
 @mcp.tool(description=_build_search_code_description())
 def search_code(query: str, limit: int = 5) -> str:
     _stats["search_code_calls"] += 1
+    coll = collection_name("code", get_active_workspace())
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
     fetch_limit = min(limit * 3, 50)
     try:
         idx, vals = sparse_embed(query)
         results = client.query_points(
-            "code",
+            coll,
             prefetch=[
                 Prefetch(query=vector, using=None, limit=fetch_limit),
                 Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=fetch_limit),
@@ -147,7 +150,7 @@ def search_code(query: str, limit: int = 5) -> str:
             with_payload=True,
         ).points
     except Exception:
-        results = client.query_points("code", query=vector, limit=fetch_limit, with_payload=True).points
+        results = client.query_points(coll, query=vector, limit=fetch_limit, with_payload=True).points
     if not results:
         return "No results found."
     scored = []
@@ -373,6 +376,70 @@ def get_community(repo: str, community_id: int) -> str:
     for f, centrality in members:
         star = "*" if centrality > 0.1 else " "
         lines.append(f"  {star} {f} (centrality: {centrality})")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def switch_workspace(name: str) -> str:
+    """Switch the active cortex workspace.
+
+    Each workspace has its own isolated Qdrant collections and repos list.
+    Use when switching between work/personal/project contexts.
+    Example: switch_workspace("work")
+    """
+    client = QdrantClient(url=QDRANT_URL)
+    existing = {c.name for c in client.get_collections().collections}
+    code_coll = collection_name("code", name)
+    notes_coll = collection_name("notes", name)
+    has_index = code_coll in existing or notes_coll in existing
+    if not has_index and name != "default":
+        return (
+            f"Workspace '{name}' has no indexed collections ({code_coll}, {notes_coll}).\n"
+            f"Index it first with reindex(), then switch."
+        )
+    set_active_workspace(name)
+    repos = _load_repos(name)
+    repo_names = [r.split("/")[-1] for r in repos]
+    return (
+        f"Switched to workspace '{name}'. "
+        f"search_code and search_notes now use {code_coll}/{notes_coll}.\n"
+        f"Repos: {', '.join(repo_names) if repo_names else 'none'}"
+    )
+
+
+@mcp.tool()
+def list_workspaces() -> str:
+    """List all cortex workspaces and their status.
+
+    Shows which workspace is currently active and whether each has indexed collections.
+    """
+    client = QdrantClient(url=QDRANT_URL)
+    existing = {c.name for c in client.get_collections().collections}
+    active = get_active_workspace()
+
+    workspaces: dict = {"default": {"code": "code", "notes": "notes"}}
+    for coll in existing:
+        if "_" in coll:
+            parts = coll.rsplit("_", 1)
+            if parts[1] in ("code", "notes"):
+                ws = parts[0]
+                if ws not in workspaces:
+                    workspaces[ws] = {}
+                workspaces[ws][parts[1]] = coll
+
+    lines = [f"Active workspace: {active}\n"]
+    for ws in sorted(workspaces):
+        marker = "* " if ws == active else "  "
+        colls = workspaces[ws]
+        has_code = colls.get("code", "") in existing
+        has_notes = colls.get("notes", "") in existing
+        status = []
+        if has_code:
+            status.append("code")
+        if has_notes:
+            status.append("notes")
+        indexed = f"indexed: {', '.join(status)}" if status else "empty"
+        lines.append(f"{marker}{ws} ({indexed})")
     return "\n".join(lines)
 
 

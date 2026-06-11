@@ -15,7 +15,8 @@ from cache import load_cache, save_cache
 NOTES_DIR   = Path(os.environ.get("NOTES_PATH", "/notes"))
 OLLAMA_URL  = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 QDRANT_URL  = os.environ.get("QDRANT_URL", "http://qdrant:6333")
-COLLECTION  = "notes"
+_WS         = os.environ.get("CORTEX_WORKSPACE", "default")
+COLLECTION  = "notes" if _WS == "default" else f"{_WS}_notes"
 EMBED_MODEL = "nomic-embed-text"
 VECTOR_SIZE = 768
 

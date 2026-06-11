@@ -18,11 +18,23 @@ from cache import load_cache, save_cache
 OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 QDRANT_URL   = os.environ.get("QDRANT_URL", "http://qdrant:6333")
 REPOS_CONFIG = os.environ.get("REPOS_CONFIG", "/app/data/repos.json")
-COLLECTION   = "code"
+_WS          = os.environ.get("CORTEX_WORKSPACE", "default")
+COLLECTION   = "code" if _WS == "default" else f"{_WS}_code"
 EMBED_MODEL  = "nomic-embed-text"
 VECTOR_SIZE  = 768
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "")
+
+# Per-workspace GitHub token override from /app/data/workspace_configs.json
+if _WS != "default":
+    try:
+        import json as _json
+        _ws_cfg_path = Path(os.environ.get("DATA_DIR", "/app/data")).parent / "workspace_configs.json"
+        if _ws_cfg_path.exists():
+            _ws_cfg = _json.loads(_ws_cfg_path.read_text()).get(_WS, {})
+            TOKEN = _ws_cfg.get("github_token", TOKEN)
+    except Exception:
+        pass
 
 DEFAULT_REPOS = [
     "Xoudusz/weakness-dex",

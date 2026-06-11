@@ -6,7 +6,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from config import DATA_DIR, STATS_FILE, VERSION
+from config import DATA_DIR, STATS_FILE, VERSION, WORKSPACE
 
 log = logging.getLogger("cortex")
 
@@ -14,8 +14,27 @@ log = logging.getLogger("cortex")
 _webhook_log: list = []
 _reindex_log: list = []
 
-# In-memory cache: repo_name → {file_path: node_metadata_dict}
+# In-memory cache: "workspace/repo_name" → {file_path: node_metadata_dict}
 _graph_cache: dict = {}
+
+_active_workspace: str = WORKSPACE
+
+
+def get_active_workspace() -> str:
+    return _active_workspace
+
+
+def set_active_workspace(name: str) -> None:
+    global _active_workspace
+    _active_workspace = name
+    _graph_cache.clear()
+
+
+def _workspace_data_dir(ws: str = "") -> Path:
+    ws = ws or _active_workspace
+    if ws == "default":
+        return DATA_DIR
+    return DATA_DIR / ws
 
 
 def _default_stats() -> dict:
@@ -95,17 +114,19 @@ def _get_code_graph_meta(repo_name: str) -> dict:
     Maps file path → node dict (centrality, community_id, imports, imported_by).
     Returns an empty dict when no graph data exists for the repo.
     """
-    if repo_name in _graph_cache:
+    ws = _active_workspace
+    cache_key = f"{ws}/{repo_name}"
+    if cache_key in _graph_cache:
         _stats["graph_cache_hits"] += 1
-        return _graph_cache[repo_name]
-    path = DATA_DIR / f"graph_{repo_name}.json"
+        return _graph_cache[cache_key]
+    path = _workspace_data_dir(ws) / f"graph_{repo_name}.json"
     if not path.exists():
         _stats["graph_cache_misses"] += 1
         return {}
     try:
         data = json.loads(path.read_text())
         meta = {n["id"]: n for n in data.get("nodes", []) if "id" in n}
-        _graph_cache[repo_name] = meta
+        _graph_cache[cache_key] = meta
         _stats["graph_cache_misses"] += 1
         return meta
     except Exception:
@@ -116,7 +137,8 @@ def _get_code_graph_meta(repo_name: str) -> dict:
 def _invalidate_graph_cache(repo_name: str = "") -> None:
     """Evict repo_name from the graph cache, or clear everything if empty."""
     if repo_name:
-        _graph_cache.pop(repo_name, None)
+        ws = _active_workspace
+        _graph_cache.pop(f"{ws}/{repo_name}", None)
     else:
         _graph_cache.clear()
 

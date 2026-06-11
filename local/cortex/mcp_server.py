@@ -10,9 +10,13 @@ from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
 from qdrant_client.models import Prefetch, Fusion, SparseVector
 
-from .config import QDRANT_PATH, DATA_DIR, VERSION, VECTOR_SIZE
+from .config import (
+    qdrant_path, data_dir, VERSION, VECTOR_SIZE,
+    WORKSPACES_DIR, get_active_workspace, set_active_workspace,
+    get_workspace_dir,
+)
 from .embedder import embed, sparse_embed
-from .state import _stats, get_graph_meta, save_stats
+from .state import _stats, get_graph_meta, save_stats, invalidate_graph_cache
 from .indexer import index_path
 
 mcp = FastMCP("cortex")
@@ -24,7 +28,7 @@ _reindex_path: str = ""
 
 
 def _qdrant() -> QdrantClient:
-    return QdrantClient(path=QDRANT_PATH)
+    return QdrantClient(path=qdrant_path())
 
 
 # ── Reindex ─────────────────────────────────────────────────────────────────
@@ -54,7 +58,7 @@ def _ppr_block(matched_files: list, matched_scores: list) -> str | None:
         from .core.notes_graph import ppr_augment
     except Exception:
         return None
-    graph_path = DATA_DIR / "graph_notes.json"
+    graph_path = data_dir() / "graph_notes.json"
     extras, reason = ppr_augment(matched_files, matched_scores, graph_path, _return_reason=True)
     if extras:
         _stats["ppr_fires"] += 1
@@ -374,6 +378,45 @@ cortex is available as an MCP tool. Use it proactively:
 <!-- fill in: things to avoid -->
 
 {cortex_section}"""
+
+
+@mcp.tool()
+def switch_workspace(name: str) -> str:
+    """Switch the active cortex workspace.
+
+    Each workspace has its own isolated index (notes + code).
+    Use when switching between work/personal/project contexts.
+    Example: switch_workspace("work")
+    """
+    ws_dir = get_workspace_dir(name)
+    if not ws_dir.exists():
+        return (
+            f"Workspace '{name}' does not exist.\n"
+            f"Create it with: cortex workspace create {name}"
+        )
+    set_active_workspace(name)
+    invalidate_graph_cache()
+    return f"Switched to workspace '{name}'. search_code and search_notes now use this workspace's index."
+
+
+@mcp.tool()
+def list_workspaces() -> str:
+    """List all cortex workspaces and their status.
+
+    Shows which workspace is currently active and whether each has an index.
+    """
+    active = get_active_workspace()
+    if not WORKSPACES_DIR.exists():
+        return f"No workspaces found. Active: '{active}' (not yet indexed)."
+    workspaces = sorted([d.name for d in WORKSPACES_DIR.iterdir() if d.is_dir()])
+    if not workspaces:
+        return f"No workspaces found. Active: '{active}'."
+    lines = [f"Active workspace: {active}\n"]
+    for ws in workspaces:
+        marker = "* " if ws == active else "  "
+        has_index = (WORKSPACES_DIR / ws / "qdrant").exists()
+        lines.append(f"{marker}{ws} ({'indexed' if has_index else 'empty'})")
+    return "\n".join(lines)
 
 
 def run() -> None:

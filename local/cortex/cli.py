@@ -7,6 +7,10 @@ from pathlib import Path
 
 import click
 
+from .config import (
+    WORKSPACES_DIR, get_active_workspace, set_active_workspace, get_workspace_dir,
+)
+
 
 @click.group()
 def cli() -> None:
@@ -42,6 +46,75 @@ def stats() -> None:
     from .mcp_server import _fmt_stats
     from .config import VERSION
     click.echo(_fmt_stats(VERSION, _stats, current=True))
+
+
+@cli.group()
+def workspace() -> None:
+    """Manage cortex workspaces."""
+
+
+@workspace.command("list")
+def workspace_list() -> None:
+    """List all workspaces and their status."""
+    active = get_active_workspace()
+    if not WORKSPACES_DIR.exists():
+        click.echo(f"No workspaces found. Active: '{active}' (not yet indexed).")
+        return
+    workspaces = sorted([d.name for d in WORKSPACES_DIR.iterdir() if d.is_dir()])
+    if not workspaces:
+        click.echo(f"No workspaces found. Active: '{active}'.")
+        return
+    click.echo(f"Active workspace: {active}\n")
+    for ws in workspaces:
+        marker = "* " if ws == active else "  "
+        has_index = (WORKSPACES_DIR / ws / "qdrant").exists()
+        click.echo(f"{marker}{ws} ({'indexed' if has_index else 'empty'})")
+
+
+@workspace.command("create")
+@click.argument("name")
+def workspace_create(name: str) -> None:
+    """Create a new workspace."""
+    ws_dir = get_workspace_dir(name)
+    if ws_dir.exists():
+        click.echo(f"Workspace '{name}' already exists.")
+        return
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    click.echo(f"Created workspace '{name}'. Switch with: cortex workspace switch {name}")
+
+
+@workspace.command("switch")
+@click.argument("name")
+def workspace_switch(name: str) -> None:
+    """Switch the active workspace."""
+    ws_dir = get_workspace_dir(name)
+    if not ws_dir.exists():
+        click.echo(f"Workspace '{name}' does not exist. Create it with: cortex workspace create {name}")
+        return
+    set_active_workspace(name)
+    click.echo(f"Switched to workspace '{name}'.")
+
+
+@workspace.command("delete")
+@click.argument("name")
+@click.confirmation_option(prompt="Delete workspace and all its data?")
+def workspace_delete(name: str) -> None:
+    """Delete a workspace and all its indexed data."""
+    if name == get_active_workspace():
+        click.echo("Cannot delete active workspace. Switch first.")
+        return
+    ws_dir = get_workspace_dir(name)
+    if not ws_dir.exists():
+        click.echo(f"Workspace '{name}' does not exist.")
+        return
+    shutil.rmtree(ws_dir)
+    click.echo(f"Deleted workspace '{name}'.")
+
+
+@workspace.command("current")
+def workspace_current() -> None:
+    """Print the active workspace name."""
+    click.echo(get_active_workspace())
 
 
 @cli.command("install")

@@ -10,8 +10,9 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 
-from state import _invalidate_graph_cache, _reindex_log, _stats
-from repos import _load_repos, _update_indexed_at
+from state import _invalidate_graph_cache, _reindex_log, _stats, get_active_workspace, _workspace_data_dir
+from repos import _load_repos, _update_indexed_at, _repos_config_path
+from config import DATA_DIR
 
 log = logging.getLogger("cortex")
 
@@ -25,9 +26,20 @@ _reindex_state: dict = {
 }
 
 
+def _workspace_env() -> dict:
+    ws = get_active_workspace()
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    if ws != "default":
+        ws_data = str(_workspace_data_dir(ws))
+        env["CORTEX_WORKSPACE"] = ws
+        env["DATA_DIR"] = ws_data
+        env["REPOS_CONFIG"] = _repos_config_path(ws)
+    return env
+
+
 def _stream(cmd: list, label: str, timeout: int) -> None:
     """Run cmd as a subprocess, streaming each output line into the reindex log."""
-    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    env = _workspace_env()
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     try:
         for line in proc.stdout:
