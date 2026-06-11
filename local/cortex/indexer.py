@@ -10,7 +10,7 @@ from qdrant_client.models import (
     MatchValue, PointStruct, SparseVector, SparseVectorParams, VectorParams,
 )
 
-from .config import QDRANT_PATH, DATA_DIR, CACHE_FILE, VECTOR_SIZE
+from .config import QDRANT_PATH, DATA_DIR, CACHE_FILE, VECTOR_SIZE, PATHS_FILE
 from .embedder import embed, sparse_embed
 from .core.chunker import chunk_file, CODE_EXTS, SKIP_DIRS
 from .core.cache import load_cache, save_cache
