@@ -20,44 +20,40 @@ Index your repos and Obsidian vault once. Search from any coding session — Cla
 
 No server, no Docker. Runs as a stdio MCP tool directly in Claude Code.
 
+**Recommended — via Claude Code plugin (auto-registers MCP):**
+
 ```bash
+# 1. Register cortex marketplace (one-time)
+claude plugin marketplace add cortex https://github.com/Xoudusz/cortex.git
+
+# 2. Install the plugin
+claude plugin install cortex@cortex
+
+# 3. Install the cortex binary
 pipx install cortex-local
-cortex install   # pulls models + registers MCP in Claude Code
 ```
 
-Restart Claude Code. Then index your projects:
+Restart Claude Code. The session-start hook pulls embedding models and registers the MCP automatically.
+
+**Legacy CPU (no SSE4.2)?** Use the `[legacy]` extra with Python 3.12 before step 3:
+```bash
+pipx install "cortex-local[legacy]" --python python3.12
+```
+
+**Without the plugin (manual):**
+
+```bash
+pipx install cortex-local
+cortex install   # pulls models + registers MCP
+# restart Claude Code
+```
+
+Then index your projects:
 
 ```bash
 cortex index ~/notes
 cortex index ~/projects/my-app
 ```
-
-Done. Claude now has `search_code`, `search_notes`, and graph tools in every session.
-
-**Legacy CPU (no SSE4.2)?** Use the `[legacy]` extra with Python 3.12:
-```bash
-pipx install "cortex-local[legacy]" --python python3.12
-cortex install
-```
-
----
-
-## Claude Code plugin
-
-Install cortex as a Claude Code plugin — the session-start hook auto-registers the MCP server so you don't have to run `cortex install` manually.
-
-```bash
-# Register the cortex marketplace (one-time)
-claude plugin marketplace add cortex https://github.com/Xoudusz/cortex.git
-
-# Install the plugin
-claude plugin install cortex@cortex
-
-# Install the cortex binary
-pipx install cortex-local
-```
-
-On next session start, cortex detects the binary and registers the MCP automatically.
 
 ---
 
