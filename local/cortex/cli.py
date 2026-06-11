@@ -1,5 +1,6 @@
 """cortex CLI — index <path> and serve (stdio MCP)."""
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -49,15 +50,19 @@ def install_cmd() -> None:
     from .embedder import pull_models as _pull
     click.echo("Downloading embedding models...")
     _pull()
+    mcp_cmd = "claude mcp add cortex --transport stdio cortex serve"
+    claude = shutil.which("claude")
+    if not claude:
+        click.echo("Models ready. Register MCP manually (claude not found in PATH):")
+        click.echo(f"  {mcp_cmd}")
+        return
     click.echo("Registering MCP server in Claude Code...")
     result = subprocess.run(
-        ["claude", "mcp", "add", "cortex", "--transport", "stdio", "cortex", "serve"],
+        [claude, "mcp", "add", "cortex", "--transport", "stdio", "cortex", "serve"],
         capture_output=True, text=True,
-        shell=(sys.platform == "win32"),
     )
     if result.returncode == 0:
         click.echo("Done. cortex is ready — restart Claude Code to activate.")
     else:
-        click.echo(f"MCP registration failed:\n{result.stderr}")
-        click.echo("Run manually: claude mcp add cortex --transport stdio cortex serve")
-        sys.exit(1)
+        click.echo(f"MCP registration failed. Run manually:\n  {mcp_cmd}")
+        click.echo(result.stderr.strip())
