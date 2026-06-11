@@ -4,8 +4,10 @@
 const { spawnSync } = require('child_process');
 
 function which(cmd) {
-  const r = spawnSync('which', [cmd], { encoding: 'utf8' });
-  return r.status === 0 ? r.stdout.trim() : null;
+  const isWin = process.platform === 'win32';
+  const r = spawnSync(isWin ? 'where' : 'which', [cmd], { encoding: 'utf8' });
+  if (r.status !== 0) return null;
+  return r.stdout.trim().split('\n')[0].trim() || null;
 }
 
 function mcpList() {
