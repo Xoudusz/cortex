@@ -6,8 +6,22 @@ _dense = None
 _sparse = None
 
 
+def _check_numpy() -> None:
+    try:
+        import numpy  # noqa: F401
+    except RuntimeError as e:
+        if "X86_V2" in str(e) or "baseline" in str(e).lower():
+            raise RuntimeError(
+                f"NumPy requires CPU features your machine lacks.\n"
+                f'Reinstall with: pipx install "cortex-local[legacy]"\n'
+                f"(Original error: {e})"
+            ) from None
+        raise
+
+
 def embed(text: str) -> list:
     """Dense embedding via fastembed nomic-embed-text (768 dims)."""
+    _check_numpy()
     global _dense
     if _dense is None:
         from fastembed import TextEmbedding
