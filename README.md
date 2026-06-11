@@ -125,6 +125,10 @@ Built from `[[wikilink]]` patterns in Markdown files:
 | `search_notes` | Vector search + PPR augmentation; PPR-surfaced notes tagged `[via wikilinks]` |
 | `get_neighbors(file, repo)` | Returns direct imports and imported-by list for a file |
 | `get_community(repo, community_id)` | Lists all files in a Louvain cluster; high-centrality files starred |
+| `reindex(notes, code, repo)` | Async re-index notes and/or code; `repo` limits to a single repo |
+| `reindex_status` | Check progress and log output of the last reindex run |
+| `get_stats(all)` | Efficiency metrics — uptime, search mix, PPR hit rate, centrality lift, cache stats |
+| `get_onboarding(existing_content)` | Returns CLAUDE.md template with Cortex + Preferences sections pre-filled |
 
 ### Efficiency metrics (`/api/stats`)
 
