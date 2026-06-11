@@ -17,16 +17,16 @@ except ImportError:
 
 _IMPORT_RE: dict = {
     "py": re.compile(r'^(?:from|import)\s+([\w.]+)', re.MULTILINE),
-    "js": re.compile(r'''(?:import|from|require)\s*\(?['"](\.[^'"]+)['"]'''),
-    "ts": re.compile(r'''(?:import|from|require)\s*\(?['"](\.[^'"]+)['"]'''),
+    "js": re.compile(r'''(?:import|from|require)\s*\(?['"](\.[^'"]+|\$lib/[^'"]+)['"]'''),
+    "ts": re.compile(r'''(?:import|from|require)\s*\(?['"](\.[^'"]+|\$lib/[^'"]+)['"]'''),
     "kt": re.compile(r'^import\s+([\w.]+)', re.MULTILINE),
 }
 
 _NAMED_IMPORT_RE = re.compile(
-    r'''import\s*\{([^}]+)\}\s*from\s*['"](\.[^'"]+)['"]'''
+    r'''import\s*\{([^}]+)\}\s*from\s*['"](\.[^'"]+|\$lib/[^'"]+)['"]'''
 )
 _DEFAULT_IMPORT_RE = re.compile(
-    r'''import\s+(\w+)\s+from\s*['"](\.[^'"]+)['"]'''
+    r'''import\s+(\w+)\s+from\s*['"](\.[^'"]+|\$lib/[^'"]+)['"]'''
 )
 _CALL_RE = re.compile(r'\b(\w+)\s*\(')
 
@@ -55,6 +55,10 @@ _LANG_KEY: dict = {
 
 _EDGE_PRIORITY: dict = {"import": 0, "call": 1, "inherits": 2}
 
+_PATH_ALIASES: dict = {
+    "$lib/": "src/lib/",
+}
+
 _PY_SKIP_BASES = frozenset({
     "object", "ABC", "ABCMeta", "BaseModel", "Exception", "BaseException",
     "ValueError", "TypeError", "RuntimeError", "str", "int", "float",
@@ -75,6 +79,11 @@ def _extract_imports(path: Path, ext: str) -> list:
 
 
 def _resolve_import(source_file: str, imp: str, all_files: set, ext: str):
+    for alias, target in _PATH_ALIASES.items():
+        if imp.startswith(alias):
+            imp = target + imp[len(alias):]
+            break
+
     if imp.startswith("."):
         base = Path(source_file).parent
         candidate = (base / imp).as_posix().lstrip("/")
@@ -86,6 +95,16 @@ def _resolve_import(source_file: str, imp: str, all_files: set, ext: str):
         for idx in ("/index.ts", "/index.js"):
             if candidate + idx in all_files:
                 return candidate + idx
+        return None
+    elif "/" in imp:
+        for try_ext in (ext, ".ts", ".tsx", ".js", ".jsx", ".svelte"):
+            if imp + try_ext in all_files:
+                return imp + try_ext
+            if imp in all_files:
+                return imp
+        for idx in ("/index.ts", "/index.js"):
+            if imp + idx in all_files:
+                return imp + idx
         return None
     else:
         for f in all_files:
