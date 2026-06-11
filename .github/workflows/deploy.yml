@@ -7,6 +7,7 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write
 
 concurrency:
   group: deploy-main
@@ -124,3 +125,13 @@ jobs:
 
           printf "%b" "$body" > /tmp/release_notes.txt
           gh release create "v$VER" --title "v$VER" --notes-file /tmp/release_notes.txt
+
+      - name: Build and publish cortex PyPI package
+        if: steps.check.outputs.new == 'true'
+        run: |
+          pip install build
+          python -m build local/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        if: steps.check.outputs.new == 'true'
+        with:
+          packages-dir: local/dist/
