@@ -248,7 +248,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
 
         function startOAuthFlow() {
             const verifier = generateVerifier();
-            sessionStorage.setItem('cortex_pkce_verifier', verifier);
+            localStorage.setItem('cortex_pkce_verifier', verifier);
             crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)).then(hash => {
                 const challenge = btoa(String.fromCharCode(...new Uint8Array(hash)))
                     .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');
@@ -268,7 +268,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             const params = new URLSearchParams(window.location.search);
             const code = params.get('code');
             if (code) {
-                const verifier = sessionStorage.getItem('cortex_pkce_verifier');
+                const verifier = localStorage.getItem('cortex_pkce_verifier');
                 if (verifier) {
                     try {
                         const res = await fetch('/token', {
@@ -286,7 +286,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                             const data = await res.json();
                             localStorage.setItem('cortex_token', data.access_token);
                             if (data.refresh_token) localStorage.setItem('cortex_refresh', data.refresh_token);
-                            sessionStorage.removeItem('cortex_pkce_verifier');
+                            localStorage.removeItem('cortex_pkce_verifier');
                         }
                     } catch (_) {}
                 }
