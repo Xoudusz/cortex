@@ -14,6 +14,25 @@ from config import HOST, PORT, QDRANT_URL, DATA_DIR, VERSION, embed, sparse_embe
 from state import _stats, _get_code_graph_meta, _load_all_stats
 from onboarding import PROJECT_CLAUDE_MD_TEMPLATE, CORTEX_MERGE_SECTION, _merge_onboarding
 from reindex import _enqueue, get_status
+from repos import _load_repos
+
+
+def _build_search_code_description() -> str:
+    repo_names = [r.split("/")[-1] for r in _load_repos()]
+    repo_list = ", ".join(repo_names) if repo_names else "no repos indexed yet"
+    return (
+        "Search source code across the user's active repos semantically.\n\n"
+        f"Indexed repos: {repo_list}.\n\n"
+        "Call this proactively whenever:\n"
+        "- Implementing a feature that touches one of these repos\n"
+        "- Looking for where something is defined or how a pattern is used\n"
+        "- Debugging — find related code before suggesting a fix\n"
+        '- The user asks "how does X work" about one of their projects\n'
+        "- Writing code that should match existing conventions in the repo\n\n"
+        "Results are re-ranked by centrality (highly-imported files score higher).\n"
+        "Returns code chunks with file path, line numbers, language, score, centrality, community, and GitHub link.\n"
+        "Always search before writing code for these repos — don't guess at existing patterns."
+    )
 
 log = logging.getLogger("cortex")
 
@@ -109,23 +128,8 @@ def search_notes(query: str, limit: int = 5) -> str:
     return out
 
 
-@mcp.tool()
+@mcp.tool(description=_build_search_code_description())
 def search_code(query: str, limit: int = 5) -> str:
-    """Search source code across the user's active repos semantically.
-
-    Indexed repos: weakness-dex, mtgdle, tower-of-evolon, tower-of-evolon-backend, svelte-radio, cortex, riftracoons.
-
-    Call this proactively whenever:
-    - Implementing a feature that touches one of these repos
-    - Looking for where something is defined or how a pattern is used
-    - Debugging — find related code before suggesting a fix
-    - The user asks "how does X work" about one of their projects
-    - Writing code that should match existing conventions in the repo
-
-    Results are re-ranked by centrality (highly-imported files score higher).
-    Returns code chunks with file path, line numbers, language, score, centrality, community, and GitHub link.
-    Always search before writing code for these repos — don't guess at existing patterns.
-    """
     _stats["search_code_calls"] += 1
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
