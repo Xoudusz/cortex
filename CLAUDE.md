@@ -39,31 +39,43 @@ Auth: built-in OAuth 2.0 (Bearer token). Login at `/authorize` with `ADMIN_PASSW
 ## Structure
 
 ```
-mcp/
-  server.py     # startup only — threads, routes, middleware wiring, uvicorn
-  config.py     # env vars, embed(), warmup()
-  state.py      # global mutable state, stats lifecycle, graph cache
-  repos.py      # repo registry persistence (_load_repos, _save_repos, etc.)
-  onboarding.py # ONBOARDING_TEMPLATE + _merge_onboarding()
-  reindex.py    # job queue, _stream, _run_reindex, _enqueue, _reindex_worker
-  middleware.py # _BearerTokenMiddleware, _NormalizeSSEPath
-  watcher.py    # _NotesHandler (debounced watchdog), _start_watcher()
-  routes.py     # all HTTP route handlers + webhook helpers
-  tools.py      # FastMCP instance + all @mcp.tool() + @mcp.prompt()
-  web_ui.py     # API handlers — search, status, stats
-  template.py   # embedded HTML/CSS/JS dashboard + LOGO_SVG
-  oauth.py      # custom OAuth 2.0 AS (RFC 8414/7591/7636, PKCE S256)
-  requirements.txt
-  Dockerfile    # build context is repo root
-indexer/
-  index.py          # Notes indexer — heading-chunked, tags, modified_at
-  index_code.py     # Code indexer — clone/pull, embed, upsert
-  chunker.py        # tree-sitter semantic chunking + sliding-window fallback
-  graph.py          # facade — re-exports from code_graph, notes_graph, global_graph
-  code_graph.py     # import/call/inheritance edges, centrality, Louvain
-  notes_graph.py    # Obsidian wikilink graph + PPR augmentation
-  global_graph.py   # cross-repo edges from root config files
-docker-compose.yml  # ollama + qdrant + cortex-mcp
+core/                   # shared lib — used by both server/ and local/
+  chunker.py            # tree-sitter semantic chunking + sliding-window fallback
+  cache.py              # load_cache / save_cache helpers
+  graph.py              # facade — re-exports from code_graph, notes_graph, global_graph
+  code_graph.py         # import/call/inheritance edges, centrality, Louvain
+  notes_graph.py        # Obsidian wikilink graph + PPR augmentation
+  global_graph.py       # cross-repo edges from root config files
+server/
+  mcp/                  # SSE server (Docker, deployed to cortex.hyvitech.org)
+    server.py           # startup only — threads, routes, middleware wiring, uvicorn
+    config.py           # env vars, embed(), warmup()
+    state.py            # global mutable state, stats lifecycle, graph cache
+    repos.py            # repo registry persistence
+    onboarding.py       # ONBOARDING_TEMPLATE + _merge_onboarding()
+    reindex.py          # job queue, _run_reindex, _enqueue, _reindex_worker
+    middleware.py       # _BearerTokenMiddleware, _NormalizeSSEPath
+    watcher.py          # debounced watchdog for notes changes
+    routes.py           # all HTTP route handlers + webhook helpers
+    tools.py            # FastMCP instance + all @mcp.tool() + @mcp.prompt()
+    web_ui.py           # API handlers — search, status, stats
+    template.py         # embedded HTML/CSS/JS dashboard + LOGO_SVG
+    oauth.py            # custom OAuth 2.0 AS (RFC 8414/7591/7636, PKCE S256)
+    requirements.txt
+    Dockerfile          # build context is repo root
+  indexer/              # code/notes indexers for server mode
+    index.py            # notes indexer — heading-chunked, tags, modified_at
+    index_code.py       # code indexer — clone/pull, embed, upsert
+local/                  # cortex PyPI package — pipx install, stdio MCP, no server needed
+  pyproject.toml        # package metadata, entry point: cortex = cortex.cli:cli
+  cortex/
+    cli.py              # cortex index <path>, cortex serve, cortex pull-models, cortex stats
+    mcp_server.py       # all 8 MCP tools, FastMCP stdio transport
+    indexer.py          # embedded Qdrant indexer (notes + code)
+    embedder.py         # fastembed dense (nomic-embed-text-v1.5) + BM25 sparse
+    config.py           # ~/.cortex paths, VECTOR_SIZE, VERSION
+    state.py            # graph cache, stats lifecycle
+docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 ```
 
 ## MCP tools

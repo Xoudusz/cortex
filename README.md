@@ -26,6 +26,21 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 | `/.well-known/oauth-authorization-server` | GET | None | OAuth AS metadata (RFC 8414) |
 | `/.well-known/oauth-protected-resource` | GET | None | OAuth protected resource metadata |
 
+## Structure
+
+```
+core/          # shared lib (chunker, cache, graph) — used by server/ and local/
+server/
+  mcp/         # SSE server — Docker, deployed to cortex.hyvitech.org
+  indexer/     # notes + code indexers for server mode
+local/         # cortex PyPI package — pipx install, stdio MCP, no server needed
+  pyproject.toml
+  cortex/      # cli.py, mcp_server.py, indexer.py, embedder.py
+docker-compose.yml
+```
+
+Install local mode: `pipx install ./local` then `claude mcp add cortex --transport stdio cortex serve`
+
 ## Deploy (Portainer)
 
 1. Stacks → Add Stack → Repository
@@ -159,7 +174,7 @@ Exposed as `GET /api/graph/global`. Dashboard: Graph tab → **★ Global (cross
 
 ## Auth
 
-Cortex is its own OAuth 2.0 Authorization Server (`mcp/oauth.py`) — no external identity provider needed.
+Cortex is its own OAuth 2.0 Authorization Server (`server/mcp/oauth.py`) — no external identity provider needed.
 
 - **Standards:** RFC 8414 (AS metadata), RFC 7591 (Dynamic Client Registration), RFC 7636 (PKCE S256)
 - **Grants:** Authorization code + refresh token
