@@ -1,7 +1,7 @@
 {
   "name": "cortex",
   "description": "Semantic code and notes search for Claude Code. Indexes your repos and Obsidian vault into a local vector store — search from any coding session.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "Xoudusz",
     "url": "https://github.com/Xoudusz"
