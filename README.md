@@ -20,7 +20,7 @@ No server, no Docker. Runs as a stdio MCP tool directly in Claude Code.
 
 **Install:**
 ```bash
-pipx install 'cortex @ git+https://github.com/Xoudusz/cortex#subdirectory=local'
+pipx install cortex-local
 cortex install
 ```
 
