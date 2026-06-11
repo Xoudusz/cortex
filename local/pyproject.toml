@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cortex-local"
-version = "2.0.3"
+version = "2.0.4"
 description = "Local semantic search MCP server — notes + code, embedded Qdrant, fastembed"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-legacy = ["numpy>=1.20,<2.0"]
+legacy = ["numpy==1.26.4"]
 
 [project.scripts]
 cortex = "cortex.cli:cli"

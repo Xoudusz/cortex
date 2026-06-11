@@ -41,7 +41,9 @@ def sparse_embed(text: str) -> tuple:
 
 def pull_models() -> None:
     """Pre-download embedding models (run at install time)."""
-    print("Pulling fastembed models...")
+    print("Pulling fastembed models (this may take a few minutes on first run)...")
+    print("  [1/2] Downloading nomic-embed-text-v1.5 (~270 MB)...", flush=True)
     embed("warmup")
+    print("  [2/2] Downloading BM25 sparse model...", flush=True)
     sparse_embed("warmup")
     print("Models ready.")
