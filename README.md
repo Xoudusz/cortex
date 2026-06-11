@@ -26,6 +26,11 @@ cortex install
 
 `cortex install` downloads the embedding models and registers the MCP server in Claude Code. Restart Claude Code after.
 
+**Legacy CPUs (no SSE4.2):** Use `[legacy]` with Python 3.12:
+```bash
+pipx install "cortex-local[legacy]" --python /path/to/python3.12
+```
+
 **Index your notes/code:**
 ```bash
 cortex index ~/notes
