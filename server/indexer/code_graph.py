@@ -84,7 +84,21 @@ def _resolve_import(source_file: str, imp: str, all_files: set, ext: str):
             imp = target + imp[len(alias):]
             break
 
-    if imp.startswith("."):
+    if imp.startswith(".") and ext == ".py":
+        dots = len(imp) - len(imp.lstrip("."))
+        module = imp[dots:].replace(".", "/")
+        base = Path(source_file).parent
+        for _ in range(dots - 1):
+            base = base.parent
+        candidate = (base / module).as_posix().lstrip("/") if module else base.as_posix().lstrip("/")
+        if candidate + ".py" in all_files:
+            return candidate + ".py"
+        if candidate + "/__init__.py" in all_files:
+            return candidate + "/__init__.py"
+        if candidate in all_files:
+            return candidate
+        return None
+    elif imp.startswith("."):
         base = Path(source_file).parent
         candidate = (base / imp).as_posix().lstrip("/")
         for try_ext in (ext, ".ts", ".tsx", ".js", ".jsx", ".svelte"):
