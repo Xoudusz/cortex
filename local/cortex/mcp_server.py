@@ -51,17 +51,9 @@ def _run_reindex(path_str: str) -> None:
 
 def _ppr_block(matched_files: list, matched_scores: list) -> str | None:
     try:
-        from core.notes_graph import ppr_augment
-    except ImportError:
-        try:
-            import sys
-            from pathlib import Path as _P
-            _core = _P(__file__).parent.parent.parent / "core"
-            if str(_core) not in sys.path:
-                sys.path.insert(0, str(_core))
-            from notes_graph import ppr_augment
-        except Exception:
-            return None
+        from .core.notes_graph import ppr_augment
+    except Exception:
+        return None
     graph_path = DATA_DIR / "graph_notes.json"
     extras, reason = ppr_augment(matched_files, matched_scores, graph_path, _return_reason=True)
     if extras:

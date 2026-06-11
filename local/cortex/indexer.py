@@ -2,7 +2,6 @@
 
 import hashlib
 import re
-import sys
 from pathlib import Path
 
 from qdrant_client import QdrantClient
@@ -13,17 +12,9 @@ from qdrant_client.models import (
 
 from .config import QDRANT_PATH, DATA_DIR, CACHE_FILE, VECTOR_SIZE
 from .embedder import embed, sparse_embed
-
-# Reuse chunking/graph logic from core
-import sys as _sys
-from pathlib import Path as _Path
-_core = _Path(__file__).parent.parent.parent / "core"
-if str(_core) not in _sys.path:
-    _sys.path.insert(0, str(_core))
-
-from chunker import chunk_file, CODE_EXTS, SKIP_DIRS  # noqa: E402
-from cache import load_cache, save_cache  # noqa: E402
-import graph as _graph  # noqa: E402
+from .core.chunker import chunk_file, CODE_EXTS, SKIP_DIRS
+from .core.cache import load_cache, save_cache
+from .core import graph as _graph
 
 
 def _qdrant() -> QdrantClient:
