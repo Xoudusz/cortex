@@ -1,0 +1,26 @@
+{
+  "name": "cortex",
+  "description": "Semantic code and notes search for Claude Code. Indexes your repos and Obsidian vault into a local vector store — search from any coding session.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Xoudusz",
+    "url": "https://github.com/Xoudusz"
+  },
+  "homepage": "https://github.com/Xoudusz/cortex",
+  "repository": "https://github.com/Xoudusz/cortex",
+  "license": "MIT",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js\"",
+            "timeout": 30,
+            "statusMessage": "Checking cortex..."
+          }
+        ]
+      }
+    ]
+  }
+}
