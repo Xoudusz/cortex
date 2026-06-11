@@ -41,3 +41,22 @@ def stats() -> None:
     from .mcp_server import _fmt_stats
     from .config import VERSION
     click.echo(_fmt_stats(VERSION, _stats, current=True))
+
+
+@cli.command("install")
+def install_cmd() -> None:
+    """Download embedding models and register cortex MCP in Claude Code."""
+    from .embedder import pull_models as _pull
+    click.echo("Downloading embedding models...")
+    _pull()
+    click.echo("Registering MCP server in Claude Code...")
+    result = subprocess.run(
+        ["claude", "mcp", "add", "cortex", "--transport", "stdio", "cortex", "serve"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        click.echo("Done. cortex is ready — restart Claude Code to activate.")
+    else:
+        click.echo(f"MCP registration failed:\n{result.stderr}")
+        click.echo("Run manually: claude mcp add cortex --transport stdio cortex serve")
+        sys.exit(1)
