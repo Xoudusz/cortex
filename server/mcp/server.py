@@ -19,7 +19,7 @@ from routes import (
     _ui_handler, _api_search_handler, _api_status_handler, _api_reindex_handler,
     _api_stats_handler, _api_graph_handler, _api_repos_handler, _api_repos_delete,
     _api_repos_meta_handler, _api_github_repos, _api_webhook_log_handler,
-    _api_reindex_log_handler, _api_logs_handler,
+    _api_reindex_log_handler, _api_logs_handler, _api_clear_cache_handler,
 )
 from tools import mcp
 import oauth as _oauth
@@ -50,6 +50,7 @@ if __name__ == "__main__":
         Route("/api/search", _api_search_handler, methods=["POST"]),
         Route("/api/status", _api_status_handler, methods=["GET"]),
         Route("/api/reindex", _api_reindex_handler, methods=["POST"]),
+Route("/api/clear-cache", _api_clear_cache_handler, methods=["POST"]),
         Route("/api/stats", _api_stats_handler, methods=["GET"]),
         Route("/api/repos", _api_repos_handler, methods=["GET", "POST"]),
         Route("/api/repos/{repo:path}", _api_repos_delete, methods=["DELETE"]),

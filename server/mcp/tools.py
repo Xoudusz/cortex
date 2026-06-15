@@ -13,7 +13,7 @@ from qdrant_client.models import Prefetch, Fusion, SparseVector
 from config import HOST, PORT, QDRANT_URL, DATA_DIR, VERSION, embed, sparse_embed, collection_name
 from state import _stats, _get_code_graph_meta, _load_all_stats, get_active_workspace, set_active_workspace, _workspace_data_dir
 from onboarding import PROJECT_CLAUDE_MD_TEMPLATE, CORTEX_MERGE_SECTION, _merge_onboarding
-from reindex import _enqueue, get_status
+from reindex import _enqueue, get_status, clear_cache as _clear_cache
 from repos import _load_repos
 
 
@@ -196,7 +196,7 @@ def search_code(query: str, limit: int = 5) -> str:
 
 
 @mcp.tool()
-def reindex(notes: bool = True, code: bool = True, repo: str = "") -> str:
+def reindex(notes: bool = True, code: bool = True, repo: str = "", force: bool = False) -> str:
     """Trigger re-indexing of notes and/or source code into Qdrant.
 
     Use when:
@@ -207,10 +207,28 @@ def reindex(notes: bool = True, code: bool = True, repo: str = "") -> str:
     Runs async — returns immediately. Call reindex_status() to check progress.
     Set notes=False to only reindex code, or code=False for notes only.
     Set repo to a specific repo name (e.g. "svelte-radio") to only reindex that repo.
+    Set force=True to clear the embed cache first (re-embeds all files, ~10x slower).
     """
-    _enqueue(notes, code, repo, files=None)
+    _enqueue(notes, code, repo, files=None, force=force)
     q = get_status()["queue_depth"]
-    return f"Reindex queued (position {q}). Use reindex_status() to check progress."
+    prefix = "Force reindex" if force else "Reindex"
+    return f"{prefix} queued (position {q}). Use reindex_status() to check progress."
+
+
+@mcp.tool()
+def clear_cache(all_workspaces: bool = False) -> str:
+    """Clear the embed cache so the next reindex re-embeds all files from scratch.
+
+    Use after deploying chunker or embedding changes that require fresh embeddings.
+    Does NOT trigger a reindex — call reindex() after this if needed.
+    Set all_workspaces=True to clear cache for every workspace (not just active one).
+    WARNING: next reindex after clearing will be ~10x slower than normal.
+    """
+    n = _clear_cache(all_workspaces=all_workspaces)
+    scope = "all workspaces" if all_workspaces else "current workspace"
+    if n == 0:
+        return f"No cache files found for {scope} (already clean)."
+    return f"Cleared {n} cache file(s) for {scope}. Run reindex() to rebuild from scratch."
 
 
 @mcp.tool()

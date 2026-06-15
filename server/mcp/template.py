@@ -203,6 +203,13 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     <button id="reindex-notes" class="secondary">Notes Only</button>
                     <button id="reindex-code" class="secondary">Code Only</button>
                 </div>
+                <div style="margin:0.5rem 0 0.75rem;display:flex;align-items:center;gap:0.75rem">
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;color:var(--text-muted);cursor:pointer">
+                        <input type="checkbox" id="force-reindex" style="cursor:pointer">
+                        Force re-embed (clear cache)
+                    </label>
+                    <button id="clear-cache-btn" class="secondary" style="font-size:0.8rem;padding:0.25rem 0.6rem;color:var(--text-muted)">Clear Cache Only</button>
+                </div>
                 <div id="queue-list" style="display:none;font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem;padding:0.3rem 0.5rem;background:var(--accent-dim);border-radius:4px"></div>
                 <div id="reindex-status" class="status-log">No reindex running.</div>
                 <div style="margin-top:1.25rem"><div class="section-title">Job History</div><div id="reindex-log-wrap"><div class="empty">No jobs run yet.</div></div></div>
@@ -483,15 +490,29 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         document.getElementById('reindex-code').addEventListener('click', function() { triggerReindex(false, true, '', this); });
 
         async function triggerReindex(notes, code, repo, btn) {
-            if (btn) { btn.disabled = true; btn._origText = btn.textContent; btn.textContent += ' (queued)'; }
+            const force = document.getElementById('force-reindex').checked;
+            if (btn) { btn.disabled = true; btn._origText = btn.textContent; btn.textContent += force ? ' (force queued)' : ' (queued)'; }
             try {
-                await api('/api/reindex', { method: 'POST', body: JSON.stringify({ notes, code, repo: repo || '' }) });
+                await api('/api/reindex', { method: 'POST', body: JSON.stringify({ notes, code, repo: repo || '', force }) });
                 pollStatus();
             } catch (err) {
                 document.getElementById('reindex-status').textContent = 'Error: ' + err.message;
                 if (btn) { btn.disabled = false; btn.textContent = btn._origText; }
             }
         }
+
+        document.getElementById('clear-cache-btn').addEventListener('click', async function() {
+            const btn = this;
+            btn.disabled = true; btn._origText = btn.textContent; btn.textContent = 'Clearing...';
+            try {
+                const data = await api('/api/clear-cache', { method: 'POST', body: JSON.stringify({ all_workspaces: false }) });
+                document.getElementById('reindex-status').textContent = `Cache cleared (${data.deleted} file(s) deleted). Run reindex to rebuild.`;
+            } catch (err) {
+                document.getElementById('reindex-status').textContent = 'Error: ' + err.message;
+            } finally {
+                btn.disabled = false; btn.textContent = btn._origText;
+            }
+        });
 
         function jobLabel(j) {
             if (!j) return '';

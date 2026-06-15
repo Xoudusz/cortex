@@ -14,7 +14,7 @@ from starlette.responses import JSONResponse, Response
 from config import DATA_DIR, GITHUB_TOKEN, OLLAMA_URL, QDRANT_URL, STATS_FILE, VERSION, WEBHOOK_SECRET, embed, sparse_embed
 from state import _reindex_log, _stats, _webhook_log
 from repos import _load_repos, _load_repos_meta, _save_repos
-from reindex import _enqueue, get_status, get_queue_snapshot
+from reindex import _enqueue, get_status, get_queue_snapshot, clear_cache as _clear_cache
 from web_ui import LOGO_SVG, api_search, api_stats, api_status, ui
 
 log = logging.getLogger("cortex")
@@ -95,8 +95,21 @@ async def _api_reindex_handler(request: Request):
         body = await request.json()
     except Exception:
         body = {}
-    _enqueue(body.get("notes", True), body.get("code", True), body.get("repo", ""), files=None)
-    return JSONResponse({"status": "queued"})
+    force = body.get("force", False)
+    _enqueue(body.get("notes", True), body.get("code", True), body.get("repo", ""), files=None, force=force)
+    return JSONResponse({"status": "queued", "force": force})
+
+
+async def _api_clear_cache_handler(request: Request):
+    """Clear embed cache for current or all workspaces."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    all_workspaces = body.get("all_workspaces", False)
+    n = _clear_cache(all_workspaces=all_workspaces)
+    scope = "all workspaces" if all_workspaces else "current workspace"
+    return JSONResponse({"deleted": n, "scope": scope})
 
 
 async def _api_stats_handler(request: Request):

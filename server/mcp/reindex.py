@@ -58,17 +58,39 @@ def _stream(cmd: list, label: str, timeout: int) -> None:
         proc.wait(timeout=timeout)
 
 
-def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=None) -> None:
+def clear_cache(all_workspaces: bool = False) -> int:
+    """Delete embed_cache.json for current workspace (or all if all_workspaces=True).
+
+    Returns number of cache files deleted.
+    """
+    deleted = 0
+    if all_workspaces:
+        targets = [DATA_DIR / "embed_cache.json"] + list(DATA_DIR.glob("*/embed_cache.json"))
+    else:
+        ws = get_active_workspace()
+        targets = [_workspace_data_dir(ws) / "embed_cache.json"]
+    for f in targets:
+        if f.exists():
+            f.unlink()
+            deleted += 1
+            log.info("cleared cache: %s", f)
+    return deleted
+
+
+def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=None, force: bool = False) -> None:
     """Execute a reindex job synchronously, updating _reindex_state throughout.
 
     Runs /app/index.py for notes and /app/index_code.py for code.
     Increments _stats["reindex_count"] on completion regardless of errors.
     """
+    if force:
+        n = clear_cache(all_workspaces=False)
+        log.info("force reindex: cleared %d cache file(s)", n)
     mode = "incremental" if files is not None else "full"
     _reindex_state.update(
         running=True, started_at=time.time(), finished_at=None,
         output=[], error=None, done=False,
-        current_job={"notes": notes, "code": code, "repo": repo, "mode": mode},
+        current_job={"notes": notes, "code": code, "repo": repo, "mode": mode, "force": force},
     )
     log.info("reindex started (notes=%s code=%s repo=%s mode=%s)", notes, code, repo or "all", mode)
     try:
@@ -101,7 +123,7 @@ def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=No
         log.info("reindex finished in %.0fs", elapsed)
 
 
-def _enqueue(notes: bool, code: bool, repo: str = "", files=None, removed=None, _log_entry=None) -> str:
+def _enqueue(notes: bool, code: bool, repo: str = "", files=None, removed=None, force: bool = False, _log_entry=None) -> str:
     """Add a reindex job to the queue and signal the worker.
 
     Coalesces incremental code jobs for the same repo: if a matching queued job
@@ -116,7 +138,7 @@ def _enqueue(notes: bool, code: bool, repo: str = "", files=None, removed=None, 
                     job["removed"] = list(set(job.get("removed", []) + (removed or [])))
                     log.info("[queue] merged %d files into queued job for %s", len(files), repo)
                     return "merged"
-        _job_queue.append({"notes": notes, "code": code, "repo": repo, "files": files, "removed": removed or [], "_log_entry": _log_entry})
+        _job_queue.append({"notes": notes, "code": code, "repo": repo, "files": files, "removed": removed or [], "force": force, "_log_entry": _log_entry})
         _reindex_state["queue_depth"] = len(_job_queue)
     _worker_event.set()
     return "triggered"
@@ -133,7 +155,7 @@ def _reindex_worker() -> None:
                     break
                 job = _job_queue.popleft()
                 _reindex_state["queue_depth"] = len(_job_queue)
-            _run_reindex(job["notes"], job["code"], job.get("repo", ""), job.get("files"), job.get("removed", []))
+            _run_reindex(job["notes"], job["code"], job.get("repo", ""), job.get("files"), job.get("removed", []), job.get("force", False))
             entry = job.get("_log_entry")
             if entry:
                 entry["status"] = "failed" if _reindex_state.get("error") else "done"
