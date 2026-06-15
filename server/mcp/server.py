@@ -9,7 +9,7 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.routing import Mount, Route
 
-from config import DATA_DIR, HOST, PORT, warmup
+from config import DATA_DIR, HOST, PORT, VERSION, warmup
 from state import _stats_saver
 from reindex import _reindex_worker
 from middleware import _BearerTokenMiddleware, _NormalizeSSEPath
@@ -24,8 +24,19 @@ from routes import (
 from tools import mcp
 import oauth as _oauth
 
+_BANNER = r"""
+   ██████╗ ██████╗ ██████╗ ████████╗███████╗██╗  ██╗
+  ██╔════╝██╔═══██╗██╔══██╗╚══██╔══╝██╔════╝╚██╗██╔╝
+  ██║     ██║   ██║██████╔╝   ██║   █████╗   ╚███╔╝
+  ██║     ██║   ██║██╔══██╗   ██║   ██╔══╝   ██╔██╗
+  ╚██████╗╚██████╔╝██║  ██║   ██║   ███████╗██╔╝ ██╗
+   ╚═════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
+"""
+
 
 if __name__ == "__main__":
+    print(_BANNER)
+    print(f"  RAG stack  ·  v{VERSION}  ·  MCP SSE server\n")
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s — %(message)s",
