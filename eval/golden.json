@@ -1,0 +1,112 @@
+[
+  {
+    "query": "bearer token authentication middleware SSE",
+    "expected_files": ["server/mcp/middleware.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "tree-sitter semantic code chunking sliding window fallback",
+    "expected_files": ["core/chunker.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "BM25 sparse embedding fastembed nomic",
+    "expected_files": ["local/cortex/embedder.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "Louvain community detection import graph centrality",
+    "expected_files": ["core/code_graph.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "PPR wikilink augmentation related notes",
+    "expected_files": ["core/notes_graph.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "OAuth PKCE authorization code token endpoint",
+    "expected_files": ["server/mcp/oauth.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "reindex job queue async worker enqueue",
+    "expected_files": ["server/mcp/reindex.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "sonarr API client fetch requests",
+    "expected_files": ["src/lib/api/client.ts"],
+    "repo": "arr-client"
+  },
+  {
+    "query": "overseerr request management API",
+    "expected_files": ["src/lib/api/overseerr.ts"],
+    "repo": "arr-client"
+  },
+  {
+    "query": "MTG card classic guessing game logic",
+    "expected_files": ["app/classic/ClassicGame.tsx"],
+    "repo": "mtgdle"
+  },
+  {
+    "query": "flavor text game component reveal answer",
+    "expected_files": ["app/flavor/FlavorGame.tsx"],
+    "repo": "mtgdle"
+  },
+  {
+    "query": "pokemon type weakness lookup data",
+    "expected_files": ["js/data.js"],
+    "repo": "weakness-dex"
+  },
+  {
+    "query": "render type chart table DOM",
+    "expected_files": ["js/render.js"],
+    "repo": "weakness-dex"
+  },
+  {
+    "query": "enemy spawn system timer",
+    "expected_files": ["Enemy/Spawner.gd"],
+    "repo": "tower-of-evolon"
+  },
+  {
+    "query": "player inventory item add remove",
+    "expected_files": ["Inventory/PlayerInventory.gd"],
+    "repo": "tower-of-evolon"
+  },
+  {
+    "query": "REST inventory controller endpoint",
+    "expected_files": ["src/main/kotlin/org/hyvitech/toebackend/inventory/InventoryController.kt"],
+    "repo": "tower-of-evolon-backend"
+  },
+  {
+    "query": "global exception handler error response",
+    "expected_files": ["src/main/kotlin/org/hyvitech/toebackend/exception/GlobalExceptionHandler.kt"],
+    "repo": "tower-of-evolon-backend"
+  },
+  {
+    "query": "radio station search filter component",
+    "expected_files": ["src/lib/components/molecules/SearchBar.svelte"],
+    "repo": "svelte-radio"
+  },
+  {
+    "query": "country picker dropdown selection",
+    "expected_files": ["src/lib/components/molecules/CountryPicker.svelte"],
+    "repo": "svelte-radio"
+  },
+  {
+    "query": "mob griefing permission command handler",
+    "expected_files": ["src/main/kotlin/org/hyvitech/letEmBreed/MobGriefingCommand.kt"],
+    "repo": "mobgriefingplus"
+  },
+  {
+    "query": "internationalization i18n locale setup",
+    "expected_files": ["src/lib/i18n.js"],
+    "repo": "riftracoons-web"
+  },
+  {
+    "query": "server side hooks SvelteKit",
+    "expected_files": ["src/hooks.server.js"],
+    "repo": "riftracoons-web"
+  }
+]
