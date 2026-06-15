@@ -15,6 +15,7 @@ from cache import load_cache, save_cache
 NOTES_DIR   = Path(os.environ.get("NOTES_PATH", "/notes"))
 OLLAMA_URL  = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 QDRANT_URL  = os.environ.get("QDRANT_URL", "http://qdrant:6333")
+DATA_DIR    = Path(os.environ.get("REPOS_CONFIG", "/app/data/repos.json")).parent
 _WS         = os.environ.get("CORTEX_WORKSPACE", "default")
 COLLECTION  = "notes" if _WS == "default" else f"{_WS}_notes"
 EMBED_MODEL = "nomic-embed-text"
@@ -163,7 +164,7 @@ def main():
     try:
         import graph as _graph
         G = _graph.build_notes_graph(NOTES_DIR)
-        _graph.persist_notes_graph(G)
+        _graph.persist_notes_graph(G, DATA_DIR)
     except Exception as e:
         print(f"  notes graph build failed: {e}")
 

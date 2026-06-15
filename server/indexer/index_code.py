@@ -18,6 +18,7 @@ from cache import load_cache, save_cache
 OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 QDRANT_URL   = os.environ.get("QDRANT_URL", "http://qdrant:6333")
 REPOS_CONFIG = os.environ.get("REPOS_CONFIG", "/app/data/repos.json")
+DATA_DIR     = Path(REPOS_CONFIG).parent
 _WS          = os.environ.get("CORTEX_WORKSPACE", "default")
 COLLECTION   = "code" if _WS == "default" else f"{_WS}_code"
 EMBED_MODEL  = "nomic-embed-text"
@@ -253,7 +254,7 @@ def main():
             G = _graph.build_code_graph(repo_path, all_code_file_paths)
             if G is not None:
                 metadata = _graph.compute_code_metadata(G)
-                _graph.persist_code_graph(G, metadata, name)
+                _graph.persist_code_graph(G, metadata, name, DATA_DIR)
                 for file_rel, meta in metadata.items():
                     point_ids = file_point_ids.get(file_rel, [])
                     if point_ids:
@@ -280,7 +281,7 @@ def main():
                 for r in repos
                 if (REPOS_DIR / r.split("/")[1]).exists()
             }
-            _graph.build_global_graph(repo_paths_map)
+            _graph.build_global_graph(repo_paths_map, DATA_DIR)
         except Exception as e:
             print(f"  global graph build failed: {e}", flush=True)
 
