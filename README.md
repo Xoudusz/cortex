@@ -52,6 +52,8 @@ cortex install
 | `reindex_status()` | Check reindex progress |
 | `get_stats()` | Efficiency metrics |
 | `get_onboarding(existing_content)` | CLAUDE.md template with cortex instructions |
+| `switch_workspace(name)` | Switch active workspace (isolated collections + repos) |
+| `list_workspaces()` | List all workspaces and their index status |
 
 ---
 
@@ -84,7 +86,7 @@ docker exec ollama ollama pull nomic-embed-text
 claude mcp add cortex -s user --transport sse https://your-server:8765/sse
 ```
 
-OAuth login opens in browser on first connection. Tokens persist (30-day access, 90-day refresh).
+OAuth login opens in browser on first connection. Tokens persist (30-day access, 90-day refresh). Running Claude Code on a remote server? Cortex relays the OAuth callback server-side — no manual URL replacement needed.
 
 **Environment variables:**
 
@@ -137,9 +139,7 @@ server/
 local/         # PyPI package (cortex-local) — stdio MCP, no server needed
   pyproject.toml
   cortex/      # cli.py, mcp_server.py, indexer.py, embedder.py
-.claude-plugin/ # Claude Code plugin manifest
-hooks/         # session-start hook for plugin
-skills/        # cortex-search, cortex-index, cortex-setup skill guides
+eval/          # golden query set + eval harness (hit@k, MRR)
 docker-compose.yml
 ```
 

@@ -88,6 +88,8 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 - `reindex_status()` — check progress of last reindex
 - `get_stats(all?)` — efficiency metrics; `all=True` shows all persisted versions side-by-side
 - `get_onboarding(existing_content?)` — returns setup instructions + preferences; pass existing CLAUDE.md content to merge
+- `switch_workspace(name)` — switch active workspace (isolated Qdrant collections + repos)
+- `list_workspaces()` — list all workspaces and their index status
 
 ## MCP prompts
 
