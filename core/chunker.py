@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Source code chunking — tree-sitter semantic parsing with sliding-window fallback."""
 
+import os
 from pathlib import Path
+
+REPOS_DIR = Path(os.environ.get("REPOS_DIR", "/tmp/repos"))
 
 CODE_EXTS = {".js", ".ts", ".tsx", ".jsx", ".svelte", ".py", ".java", ".go", ".rs", ".css", ".html", ".kt", ".kts", ".gd", ".yml", ".yaml"}
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", ".svelte-kit", "__pycache__", ".gradle", "target"}

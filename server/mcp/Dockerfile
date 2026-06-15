@@ -15,6 +15,7 @@ COPY VERSION /app/VERSION
 COPY server/mcp/server.py server/mcp/web_ui.py server/mcp/oauth.py server/mcp/config.py server/mcp/reindex.py server/mcp/tools.py \
      server/mcp/template.py server/mcp/state.py server/mcp/repos.py server/mcp/onboarding.py \
      server/mcp/middleware.py server/mcp/watcher.py server/mcp/routes.py ./
-COPY server/indexer/index.py server/indexer/index_code.py server/indexer/graph.py server/indexer/code_graph.py server/indexer/notes_graph.py server/indexer/global_graph.py server/indexer/chunker.py server/indexer/cache.py ./
+COPY core/chunker.py core/cache.py core/graph.py core/code_graph.py core/notes_graph.py core/global_graph.py ./
+COPY server/indexer/index.py server/indexer/index_code.py ./
 RUN chmod +x /app/index.py /app/index_code.py
 CMD ["python", "server.py"]
