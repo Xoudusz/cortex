@@ -8,6 +8,7 @@ Implements:
 """
 import base64
 import hashlib
+import httpx
 import json
 import logging
 import os
@@ -158,9 +159,11 @@ async def register(request: Request) -> JSONResponse:
         "response_types": body.get("response_types", ["code"]),
         "token_endpoint_auth_method": "none",
     }
+    if any("localhost" in uri for uri in redirect_uris):
+        client["client_host"] = request.client.host if request.client else ""
     _store["clients"][client_id] = client
     _save()
-    log.info("[oauth] registered client %s (%s)", client_id, client.get("client_name"))
+    log.info("[oauth] registered client %s (%s) host=%s", client_id, client.get("client_name"), client.get("client_host", ""))
     return JSONResponse(
         {**client, "client_id_issued_at": int(datetime.now(timezone.utc).timestamp())},
         status_code=201,
@@ -202,6 +205,33 @@ button:hover { background: #c084fc; }
     <button type="submit">Sign in</button>
     __ERROR__
   </form>
+</div>
+</body>
+</html>"""
+
+
+_RELAY_SUCCESS_PAGE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cortex — Authorized</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #111318; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.card { background: #1c2030; border: 1px solid #2d3248; border-radius: 12px; padding: 2rem; width: 100%; max-width: 360px; text-align: center; }
+h1 { font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #c084fc, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 1rem; }
+p { font-size: 0.9rem; color: #8896a8; }
+.check { font-size: 2rem; margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="check">✓</div>
+  <h1>Cortex</h1>
+  <p>Authorization complete — you can close this tab.</p>
 </div>
 </body>
 </html>"""
@@ -296,6 +326,21 @@ async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | 
 
     sep = "&" if "?" in redirect_uri else "?"
     params = urllib.parse.urlencode({"code": code, **({"state": state} if state else {})})
+
+    if redirect_uri.startswith("http://localhost:"):
+        client_data = _store["clients"].get(client_id, {})
+        client_host = client_data.get("client_host", "")
+        if client_host:
+            real_url = redirect_uri.replace("http://localhost:", f"http://{client_host}:", 1)
+            target = real_url + sep + params
+            try:
+                async with httpx.AsyncClient() as hc:
+                    await hc.get(target, follow_redirects=False, timeout=5.0)
+                log.info("[oauth] relayed callback to %s", target)
+            except Exception as e:
+                log.warning("[oauth] relay to %s failed: %s", target, e)
+            return HTMLResponse(_RELAY_SUCCESS_PAGE)
+
     return RedirectResponse(redirect_uri + sep + params, status_code=302)
 
 
