@@ -62,8 +62,8 @@ if __name__ == "__main__":
         Route("/.well-known/oauth-authorization-server", _oauth.well_known_as),
         Route("/.well-known/oauth-protected-resource", _oauth.well_known_resource),
         Route("/register", _oauth.register, methods=["POST"]),
-        Route("/authorize", _oauth.authorize_get, methods=["GET"]),
-        Route("/authorize", _oauth.authorize_post, methods=["POST"]),
+        Route("/oauth/authorize", _oauth.authorize_get, methods=["GET"]),
+        Route("/oauth/authorize", _oauth.authorize_post, methods=["POST"]),
         Route("/token", _oauth.token_endpoint, methods=["POST"]),
         Mount("/sse", app=sse_app),
     ])

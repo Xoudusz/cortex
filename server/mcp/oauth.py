@@ -117,7 +117,7 @@ async def well_known_as(request: Request) -> JSONResponse:
     """RFC 8414: serve Authorization Server metadata at /.well-known/oauth-authorization-server."""
     return JSONResponse({
         "issuer": BASE_URL,
-        "authorization_endpoint": BASE_URL + "/authorize",
+        "authorization_endpoint": BASE_URL + "/oauth/authorize",
         "token_endpoint": BASE_URL + "/token",
         "registration_endpoint": BASE_URL + "/register",
         "response_types_supported": ["code"],

@@ -19,7 +19,7 @@ class _BearerTokenMiddleware:
     Returns 401 with WWW-Authenticate header on missing or invalid tokens.
     """
 
-    _UNPROTECTED = frozenset({"/health", "/webhook", "/register", "/authorize", "/token", "/", "/favicon.svg"})
+    _UNPROTECTED = frozenset({"/health", "/webhook", "/register", "/oauth/authorize", "/token", "/", "/favicon.svg"})
 
     def __init__(self, app):
         self.app = app
