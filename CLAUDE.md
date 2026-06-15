@@ -25,7 +25,7 @@ Auth: built-in OAuth 2.0 (Bearer token). Login at `/authorize` with `ADMIN_PASSW
 - Search tab: query notes/code, toggle collections
 - Admin tab: trigger reindex, view status, collection stats
 
-**API endpoints (Authelia-protected):**
+**API endpoints (Bearer token required):**
 - `POST /api/search` — `{"query": "...", "collections": ["notes","code"], "limit": 10}`
 - `GET /api/status` — reindex status
 - `POST /api/reindex` — `{"notes": true, "code": true, "repo": ""}`
