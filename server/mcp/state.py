@@ -5,6 +5,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from config import DATA_DIR, STATS_FILE, VERSION, WORKSPACE
 
