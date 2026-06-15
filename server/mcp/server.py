@@ -35,8 +35,8 @@ _BANNER = r"""
 
 
 if __name__ == "__main__":
-    print(_BANNER)
-    print(f"  RAG stack  ·  v{VERSION}  ·  MCP SSE server\n")
+    print(_BANNER, flush=True)
+    print(f"  RAG stack  ·  v{VERSION}  ·  MCP SSE server\n", flush=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s — %(message)s",
