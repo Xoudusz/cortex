@@ -84,8 +84,9 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 - `search_code(query, limit)` — semantic search over source code + centrality re-ranking
 - `get_neighbors(file, repo)` — imports + imported-by for a file
 - `get_community(repo, community_id)` — all files in a Louvain cluster
-- `reindex(notes, code, repo)` — async, returns immediately
+- `reindex(notes, code, repo, force?)` — async; `force=True` clears embed cache first (~10x slower)
 - `reindex_status()` — check progress of last reindex
+- `clear_cache(all_workspaces?)` — delete embed cache for current workspace (or all); not auto-approved
 - `get_stats(all?)` — efficiency metrics; `all=True` shows all persisted versions side-by-side
 - `get_onboarding(existing_content?)` — returns setup instructions + preferences; pass existing CLAUDE.md content to merge
 - `switch_workspace(name)` — switch active workspace (isolated Qdrant collections + repos)
@@ -122,6 +123,19 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 | `WEBHOOK_SECRET` | — | GitHub webhook signature secret |
 | `ADMIN_PASSWORD` | — | OAuth login password (required if auth enabled) |
 | `BASE_URL` | `http://localhost:8765` | Public URL for OAuth metadata |
+
+## Eval
+
+```bash
+cd /root/projects/cortex
+python3 eval/run.py                                                        # hit@k + MRR against golden set
+python3 eval/run.py --save baseline                                        # save named baseline
+python3 eval/run.py --compare baseline                                     # diff against saved baseline
+python3 eval/run.py --url https://cortex.hyvitech.org/api --token <tok>   # via HTTP API
+```
+
+Golden set: `eval/golden.json` (21 queries). Baselines: `eval/baselines.json`.
+Requires reindex before meaningful results. Qdrant: `http://192.168.68.103:6333`.
 
 ## After changes
 
