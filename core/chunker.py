@@ -17,6 +17,80 @@ CHUNK_LINES = 30
 OVERLAP_LINES = 5
 MAX_CHUNK_LINES = 80
 
+_FRAMEWORK_FILENAMES = {
+    # SvelteKit route/hook conventions
+    "hooks.server":    "sveltekit server hooks handle",
+    "hooks.client":    "sveltekit client hooks",
+    "+page":           "sveltekit page component",
+    "+layout":         "sveltekit layout component",
+    "+server":         "sveltekit api route endpoint",
+    "+page.server":    "sveltekit page server load action",
+    "+layout.server":  "sveltekit layout server load",
+    "+error":          "sveltekit error page",
+    # Framework config files (unambiguous)
+    "svelte.config":   "sveltekit",
+    "next.config":     "nextjs",
+    "nuxt.config":     "nuxt",
+    "astro.config":    "astro",
+    "remix.config":    "remix",
+    # Next.js pages router conventions
+    "_app":            "nextjs",
+    "_document":       "nextjs",
+}
+
+_FRAMEWORK_IMPORTS = [
+    # JS/TS frameworks
+    ("@sveltejs/kit",          "sveltekit"),
+    ("from 'react'",           "react"),
+    ('from "react"',           "react"),
+    ("from 'next/",            "nextjs"),
+    ('from "next/',            "nextjs"),
+    ("from 'vue'",             "vue"),
+    ('from "vue"',             "vue"),
+    ("@angular/core",          "angular"),
+    ("from 'express'",         "express"),
+    ('from "express"',         "express"),
+    ("from 'fastify'",         "fastify"),
+    ('from "fastify"',         "fastify"),
+    ("from 'solid-js'",        "solidjs"),
+    ('from "solid-js"',        "solidjs"),
+    ("@remix-run/",            "remix"),
+    ("from 'astro'",           "astro"),
+    ('from "astro"',           "astro"),
+    # Python frameworks
+    ("from fastapi",           "fastapi"),
+    ("import fastapi",         "fastapi"),
+    ("from django",            "django"),
+    ("import django",          "django"),
+    ("from flask",             "flask"),
+    ("import flask",           "flask"),
+    ("from starlette",         "starlette"),
+    ("from pydantic",          "pydantic"),
+    ("from sqlalchemy",        "sqlalchemy"),
+    # Python ML/data
+    ("import torch",           "pytorch"),
+    ("from torch",             "pytorch"),
+    ("import tensorflow",      "tensorflow"),
+    ("from tensorflow",        "tensorflow"),
+    ("import numpy",           "numpy"),
+    ("import pandas",          "pandas"),
+    ("from sklearn",           "scikit-learn"),
+    ("from transformers",      "huggingface"),
+    ("from qdrant_client",     "qdrant"),
+    ("from fastembed",         "fastembed"),
+    # Kotlin/Java
+    ("import io.ktor",         "ktor"),
+    ("import org.springframework", "spring"),
+    ("import androidx",        "android"),
+    # Go
+    ("gin-gonic/gin",          "gin"),
+    ("gofiber/fiber",          "fiber"),
+    # Rust
+    ("use actix",              "actix"),
+    ("use axum",               "axum"),
+    ("use tokio",              "tokio"),
+]
+
 try:
     from tree_sitter import Language, Parser as _TSParser
     import tree_sitter_python as _tspy
@@ -58,7 +132,21 @@ def _path_tokens(repo_name: str, rel: str) -> str:
     return " ".join(parts)
 
 
-def _sliding_window(lines: list, start: int, end: int, repo_name: str, rel: str, language: str, github_url_base: str = "") -> list:
+def _extra_tokens(rel: str, lines: list) -> str:
+    stem = Path(rel).stem
+    parts = []
+    if stem in _FRAMEWORK_FILENAMES:
+        parts.append(_FRAMEWORK_FILENAMES[stem])
+    header = "\n".join(lines[:50])
+    seen = set(parts)
+    for pattern, framework in _FRAMEWORK_IMPORTS:
+        if pattern in header and framework not in seen:
+            parts.append(framework)
+            seen.add(framework)
+    return " ".join(parts)
+
+
+def _sliding_window(lines: list, start: int, end: int, repo_name: str, rel: str, language: str, github_url_base: str = "", extra_tokens: str = "") -> list:
     step = CHUNK_LINES - OVERLAP_LINES
     chunks = []
     i = start
@@ -68,10 +156,13 @@ def _sliding_window(lines: list, start: int, end: int, repo_name: str, rel: str,
         if body:
             url = f"{github_url_base}/{rel}#L{i+1}-L{j}" if github_url_base else ""
             tokens = _path_tokens(repo_name, rel)
+            header = f"# {repo_name}/{rel} (lines {i+1}-{j})\n# {tokens}"
+            if extra_tokens:
+                header += f"\n# {extra_tokens}"
             chunks.append({
                 "repo": repo_name, "file": rel, "language": language,
                 "start_line": i + 1, "end_line": j,
-                "text": f"# {repo_name}/{rel} (lines {i+1}-{j})\n# {tokens}\n\n{body}",
+                "text": f"{header}\n\n{body}",
                 "github_url": url,
             })
         if j == end:
@@ -120,6 +211,11 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
     except ValueError:
         rel = path.name
     language = LANG_MAP.get(ext, ext.lstrip("."))
+    extra = _extra_tokens(rel, lines)
+
+    def _header(rel: str, s: int, e: int, tokens: str) -> str:
+        h = f"# {repo_name}/{rel} (lines {s}-{e})\n# {tokens}"
+        return h + f"\n# {extra}" if extra else h
 
     # Small files: keep as single chunk to avoid diluting path/filename signal
     if len(lines) <= MAX_CHUNK_LINES:
@@ -130,7 +226,7 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
             return [{
                 "repo": repo_name, "file": rel, "language": language,
                 "start_line": 1, "end_line": len(lines),
-                "text": f"# {repo_name}/{rel} (lines 1-{len(lines)})\n# {tokens}\n\n{body}",
+                "text": f"{_header(rel, 1, len(lines), tokens)}\n\n{body}",
                 "github_url": url,
             }]
         return []
@@ -147,7 +243,7 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
                     s = node.start_point[0]
                     e = node.end_point[0] + 1
                     if e - s > MAX_CHUNK_LINES:
-                        chunks.extend(_sliding_window(lines, s, e, repo_name, rel, language, github_url_base))
+                        chunks.extend(_sliding_window(lines, s, e, repo_name, rel, language, github_url_base, extra))
                     else:
                         body = "\n".join(lines[s:e]).strip()
                         if body:
@@ -156,11 +252,11 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
                             chunks.append({
                                 "repo": repo_name, "file": rel, "language": language,
                                 "start_line": s + 1, "end_line": e,
-                                "text": f"# {repo_name}/{rel} (lines {s+1}-{e})\n# {tokens}\n\n{body}",
+                                "text": f"{_header(rel, s+1, e, tokens)}\n\n{body}",
                                 "github_url": url,
                             })
                 return chunks
         except Exception:
             pass
 
-    return _sliding_window(lines, 0, len(lines), repo_name, rel, language, github_url_base)
+    return _sliding_window(lines, 0, len(lines), repo_name, rel, language, github_url_base, extra)
