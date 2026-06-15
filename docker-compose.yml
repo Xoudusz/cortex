@@ -31,6 +31,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
       - REPOS_CONFIG=/app/data/repos.json
+      - PPR_THRESHOLD=${PPR_THRESHOLD:-}  # optional, default 0.03
     volumes:
       - /home/docker/volumes/syncthing/notes:/notes:ro
       - /home/docker/volumes/cortex/config:/app/data

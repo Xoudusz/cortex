@@ -10,7 +10,7 @@ from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
 from qdrant_client.models import Prefetch, Fusion, SparseVector
 
-from config import HOST, PORT, QDRANT_URL, DATA_DIR, VERSION, embed, sparse_embed, collection_name
+from config import HOST, PORT, QDRANT_URL, DATA_DIR, VERSION, embed, sparse_embed, collection_name, PPR_THRESHOLD
 from state import _stats, _get_code_graph_meta, _load_all_stats, get_active_workspace, set_active_workspace, _workspace_data_dir
 from onboarding import PROJECT_CLAUDE_MD_TEMPLATE, CORTEX_MERGE_SECTION, _merge_onboarding
 from reindex import _enqueue, get_status, clear_cache as _clear_cache
@@ -57,7 +57,7 @@ def _augment_with_ppr(matched_files: list, matched_scores: list, graph_path) -> 
         if not any(f in nodes for f in matched_files):
             _stats["ppr_no_matches"] += 1
             return None
-        extras, reason = ppr_augment(matched_files, matched_scores, graph_path, _return_reason=True)
+        extras, reason = ppr_augment(matched_files, matched_scores, graph_path, threshold=PPR_THRESHOLD, _return_reason=True)
         if extras:
             _stats["ppr_fires"] += 1
             _stats["ppr_results_added"] += len(extras)

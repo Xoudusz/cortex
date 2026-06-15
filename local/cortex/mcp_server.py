@@ -13,7 +13,7 @@ from qdrant_client.models import Prefetch, Fusion, SparseVector
 from .config import (
     qdrant_path, data_dir, VERSION, VECTOR_SIZE,
     WORKSPACES_DIR, get_active_workspace, set_active_workspace,
-    get_workspace_dir,
+    get_workspace_dir, PPR_THRESHOLD,
 )
 from .embedder import embed, sparse_embed
 from .state import _stats, get_graph_meta, save_stats, invalidate_graph_cache
@@ -59,7 +59,7 @@ def _ppr_block(matched_files: list, matched_scores: list) -> str | None:
     except Exception:
         return None
     graph_path = data_dir() / "graph_notes.json"
-    extras, reason = ppr_augment(matched_files, matched_scores, graph_path, _return_reason=True)
+    extras, reason = ppr_augment(matched_files, matched_scores, graph_path, threshold=PPR_THRESHOLD, _return_reason=True)
     if extras:
         _stats["ppr_fires"] += 1
         _stats["ppr_results_added"] += len(extras)

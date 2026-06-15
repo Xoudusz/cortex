@@ -31,6 +31,7 @@ VERSION        = (Path("/app/VERSION").read_text().strip()
                   if Path("/app/VERSION").exists() else "dev")
 STATS_FILE     = DATA_DIR / "stats.json"
 WORKSPACE      = os.environ.get("CORTEX_WORKSPACE", "default")
+PPR_THRESHOLD  = float(os.environ.get("PPR_THRESHOLD", "0.03"))
 
 
 def collection_name(base: str, workspace: str = "") -> str:

@@ -1,5 +1,6 @@
 """Paths and constants for cortex local mode."""
 
+import os
 import shutil
 from pathlib import Path
 
@@ -9,6 +10,7 @@ ACTIVE_WORKSPACE_FILE = CORTEX_DIR / "active_workspace"
 
 EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 VECTOR_SIZE = 768
+PPR_THRESHOLD = float(os.environ.get("PPR_THRESHOLD", "0.03"))
 
 try:
     from importlib.metadata import version
