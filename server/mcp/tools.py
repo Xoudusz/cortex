@@ -232,8 +232,12 @@ def clear_cache(all_workspaces: bool = False) -> str:
 
 
 @mcp.tool()
-def reindex_status() -> str:
-    """Check whether a reindex is running or finished, and see its output log."""
+def reindex_status(monitor: bool = False) -> str:
+    """Check whether a reindex is running or finished, and see its output log.
+
+    Set monitor=True to auto-monitor: if still running, returns a ScheduleWakeup
+    instruction so Claude polls every 60s and sends a PushNotification when done.
+    """
     s = get_status()
     q = s.get("queue_depth", 0)
     if s["started_at"] is None:
@@ -249,7 +253,18 @@ def reindex_status() -> str:
         lines.append("\n".join(s["output"]))
     if s["error"]:
         lines.append(f"Error: {s['error']}")
-    return "\n\n".join(lines)
+    result = "\n\n".join(lines)
+    if monitor and (s["running"] or q > 0):
+        result += (
+            "\n\nMONITOR INSTRUCTION: Call ScheduleWakeup immediately with:\n"
+            "- delaySeconds: 60\n"
+            "- prompt: \"Call the cortex reindex_status MCP tool with monitor=True. "
+            "If still running (running=True or queue_depth>0), the tool will instruct you to reschedule. "
+            "If done, call PushNotification with a one-line summary and stop.\""
+        )
+    elif monitor and not s["running"] and q == 0:
+        result += "\n\nMONITOR: Reindex already done — no scheduling needed."
+    return result
 
 
 def _fmt_version_stats(v: str, stats: dict, current: bool = False) -> str:
