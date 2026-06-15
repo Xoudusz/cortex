@@ -19,7 +19,7 @@ EVAL_DIR = Path(__file__).parent
 GOLDEN_FILE = EVAL_DIR / "golden.json"
 BASELINES_FILE = EVAL_DIR / "baselines.json"
 
-DEFAULT_QDRANT = "http://localhost:6333"
+DEFAULT_QDRANT = "http://192.168.68.103:6333"
 DEFAULT_LIMIT = 5
 
 
@@ -37,24 +37,51 @@ def _ollama_embed(text: str, ollama_url: str) -> list:
 
 def _search_qdrant(qdrant_url: str, ollama_url: str = "http://192.168.68.103:11434"):
     from qdrant_client import QdrantClient
-    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    from qdrant_client.models import Filter, FieldCondition, MatchValue, Prefetch, Fusion, SparseVector
 
     client = QdrantClient(url=qdrant_url)
+
+    try:
+        from fastembed import SparseTextEmbedding
+        _sparse = SparseTextEmbedding(model_name="Qdrant/bm25")
+        def _sparse_embed(text: str):
+            result = list(_sparse.embed([text]))[0]
+            return result.indices.tolist(), result.values.tolist()
+        _has_sparse = True
+    except Exception:
+        _has_sparse = False
 
     def search(query: str, limit: int, repo: str = "") -> list[str]:
         vector = _ollama_embed(query, ollama_url)
         fetch_limit = min(limit * 3, 50)
         q_filter = Filter(must=[FieldCondition(key="repo", match=MatchValue(value=repo))]) if repo else None
-        results = client.query_points(
-            "code",
-            query=vector,
-            limit=fetch_limit,
-            with_payload=True,
-            query_filter=q_filter,
-        ).points
+
+        if _has_sparse:
+            try:
+                idx, vals = _sparse_embed(query)
+                results = client.query_points(
+                    "code",
+                    prefetch=[
+                        Prefetch(query=vector, using=None, limit=fetch_limit),
+                        Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=fetch_limit),
+                    ],
+                    query=Fusion.RRF,
+                    limit=fetch_limit,
+                    with_payload=True,
+                    query_filter=q_filter,
+                ).points
+            except Exception:
+                results = client.query_points("code", query=vector, limit=fetch_limit, with_payload=True, query_filter=q_filter).points
+        else:
+            results = client.query_points("code", query=vector, limit=fetch_limit, with_payload=True, query_filter=q_filter).points
+
+        # mirror production centrality re-ranking
+        scored = [(r.score * (1.0 + 0.2 * r.payload.get("centrality", 0.0)), r) for r in results]
+        scored.sort(key=lambda x: -x[0])
+
         seen: set = set()
         files = []
-        for r in results:
+        for _, r in scored:
             f = r.payload.get("file", "")
             if f not in seen:
                 seen.add(f)

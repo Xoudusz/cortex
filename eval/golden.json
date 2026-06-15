@@ -95,11 +95,6 @@
     "repo": "svelte-radio"
   },
   {
-    "query": "mob griefing permission command handler",
-    "expected_files": ["src/main/kotlin/org/hyvitech/letEmBreed/MobGriefingCommand.kt"],
-    "repo": "mobgriefingplus"
-  },
-  {
     "query": "internationalization i18n locale setup",
     "expected_files": ["src/lib/i18n.js"],
     "repo": "riftracoons-web"

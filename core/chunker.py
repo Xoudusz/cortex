@@ -49,6 +49,15 @@ except Exception:
     _TS_SEMANTIC = {}
 
 
+def _path_tokens(repo_name: str, rel: str) -> str:
+    parts = [repo_name.replace("-", " ").replace("_", " ")]
+    for p in Path(rel).parts[:-1]:
+        parts.append(p.replace("-", " ").replace("_", " "))
+    stem = Path(rel).stem.replace("-", " ").replace("_", " ").replace(".", " ")
+    parts.append(stem)
+    return " ".join(parts)
+
+
 def _sliding_window(lines: list, start: int, end: int, repo_name: str, rel: str, language: str, github_url_base: str = "") -> list:
     step = CHUNK_LINES - OVERLAP_LINES
     chunks = []
@@ -58,10 +67,11 @@ def _sliding_window(lines: list, start: int, end: int, repo_name: str, rel: str,
         body = "\n".join(lines[i:j]).strip()
         if body:
             url = f"{github_url_base}/{rel}#L{i+1}-L{j}" if github_url_base else ""
+            tokens = _path_tokens(repo_name, rel)
             chunks.append({
                 "repo": repo_name, "file": rel, "language": language,
                 "start_line": i + 1, "end_line": j,
-                "text": f"# {repo_name}/{rel} (lines {i+1}-{j})\n\n{body}",
+                "text": f"# {repo_name}/{rel} (lines {i+1}-{j})\n# {tokens}\n\n{body}",
                 "github_url": url,
             })
         if j == end:
@@ -111,6 +121,20 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
         rel = path.name
     language = LANG_MAP.get(ext, ext.lstrip("."))
 
+    # Small files: keep as single chunk to avoid diluting path/filename signal
+    if len(lines) <= MAX_CHUNK_LINES:
+        body = "\n".join(lines).strip()
+        if body:
+            url = f"{github_url_base}/{rel}#L1-L{len(lines)}" if github_url_base else ""
+            tokens = _path_tokens(repo_name, rel)
+            return [{
+                "repo": repo_name, "file": rel, "language": language,
+                "start_line": 1, "end_line": len(lines),
+                "text": f"# {repo_name}/{rel} (lines 1-{len(lines)})\n# {tokens}\n\n{body}",
+                "github_url": url,
+            }]
+        return []
+
     if _TS_AVAILABLE and ext in _TS_LANGUAGES:
         try:
             parser = _TSParser(_TS_LANGUAGES[ext])
@@ -128,10 +152,11 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
                         body = "\n".join(lines[s:e]).strip()
                         if body:
                             url = f"{github_url_base}/{rel}#L{s+1}-L{e}" if github_url_base else ""
+                            tokens = _path_tokens(repo_name, rel)
                             chunks.append({
                                 "repo": repo_name, "file": rel, "language": language,
                                 "start_line": s + 1, "end_line": e,
-                                "text": f"# {repo_name}/{rel} (lines {s+1}-{e})\n\n{body}",
+                                "text": f"# {repo_name}/{rel} (lines {s+1}-{e})\n# {tokens}\n\n{body}",
                                 "github_url": url,
                             })
                 return chunks
