@@ -19,7 +19,7 @@ Dashboard at `/` for search and admin operations.
 https://cortex.hyvitech.org/
 ```
 
-Auth: built-in OAuth 2.0 (Bearer token). Login at `/authorize` with `ADMIN_PASSWORD`.
+Auth: built-in OAuth 2.0 (Bearer token). Login at `/oauth/authorize` with `ADMIN_PASSWORD`.
 
 **Features:**
 - Search tab: query notes/code, toggle collections

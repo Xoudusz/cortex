@@ -260,7 +260,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     code_challenge: challenge,
                     code_challenge_method: 'S256',
                 });
-                window.location.href = '/authorize?' + params.toString();
+                window.location.href = '/oauth/authorize?' + params.toString();
             });
         }
 
