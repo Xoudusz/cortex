@@ -36,7 +36,7 @@
   },
   {
     "query": "sonarr API client fetch requests",
-    "expected_files": ["src/lib/api/client.ts"],
+    "expected_files": ["src/lib/api/sonarr.ts"],
     "repo": "arr-client"
   },
   {
