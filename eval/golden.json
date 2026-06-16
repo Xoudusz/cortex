@@ -203,5 +203,65 @@
     "query": "team teaser card role pills TOP JGL MID ADC SUP lol-main lol-academy",
     "expected_files": ["src/routes/+page.svelte"],
     "repo": "riftracoons-web"
+  },
+  {
+    "query": "MCP tool definitions FastMCP search_code search_notes RRF Qdrant prefetch",
+    "expected_files": ["server/mcp/tools.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "env vars Ollama QDRANT embed warmup nomic-embed-text config",
+    "expected_files": ["server/mcp/config.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "active workspace graph cache global mutable state lifecycle",
+    "expected_files": ["server/mcp/state.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "cortex local CLI index serve pull-models command",
+    "expected_files": ["local/cortex/cli.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "local indexer embedded Qdrant notes code chunk upsert",
+    "expected_files": ["local/cortex/indexer.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "Tauri apiFetch plugin-http browser fetch wrapper",
+    "expected_files": ["src/lib/api/client.ts"],
+    "repo": "arr-client"
+  },
+  {
+    "query": "guess grid correct partial wrong feedback cell color comparison",
+    "expected_files": ["components/GuessGrid.tsx"],
+    "repo": "mtgdle"
+  },
+  {
+    "query": "MTG card property set year direction comparison feedback",
+    "expected_files": ["lib/compare.ts"],
+    "repo": "mtgdle"
+  },
+  {
+    "query": "enemy health take damage death drop item GDScript",
+    "expected_files": ["Enemy/Enemy.gd"],
+    "repo": "tower-of-evolon"
+  },
+  {
+    "query": "player REST controller create get endpoint Spring Kotlin",
+    "expected_files": ["src/main/kotlin/org/hyvitech/toebackend/player/PlayerController.kt"],
+    "repo": "tower-of-evolon-backend"
+  },
+  {
+    "query": "station card grid responsive layout select toggle favorite",
+    "expected_files": ["src/lib/components/organisms/StationGrid.svelte"],
+    "repo": "svelte-radio"
+  },
+  {
+    "query": "station browser API search pagination load more results",
+    "expected_files": ["src/lib/components/organisms/StationList.svelte"],
+    "repo": "svelte-radio"
   }
 ]
