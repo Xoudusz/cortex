@@ -35,6 +35,36 @@
     "repo": "cortex"
   },
   {
+    "query": "mtime embed cache load save skip unchanged files",
+    "expected_files": ["core/cache.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "notes filesystem watchdog debounce reindex trigger",
+    "expected_files": ["server/mcp/watcher.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "Starlette HTTP route handler webhook HMAC search API",
+    "expected_files": ["server/mcp/routes.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "cross-repo global graph package.json requirements.txt dependency edges",
+    "expected_files": ["core/global_graph.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "search stats Qdrant collection count response web UI handler",
+    "expected_files": ["server/mcp/web_ui.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "repo registry active repos load save JSON persistence",
+    "expected_files": ["server/mcp/repos.py"],
+    "repo": "cortex"
+  },
+  {
     "query": "sonarr API client fetch requests",
     "expected_files": ["src/lib/api/sonarr.ts"],
     "repo": "arr-client"
@@ -45,6 +75,16 @@
     "repo": "arr-client"
   },
   {
+    "query": "radarr movie API client fetch TypeScript",
+    "expected_files": ["src/lib/api/radarr.ts"],
+    "repo": "arr-client"
+  },
+  {
+    "query": "prowlarr indexer status history API client",
+    "expected_files": ["src/lib/api/prowlarr.ts"],
+    "repo": "arr-client"
+  },
+  {
     "query": "MTG card classic guessing game logic",
     "expected_files": ["app/classic/ClassicGame.tsx"],
     "repo": "mtgdle"
@@ -52,6 +92,16 @@
   {
     "query": "flavor text game component reveal answer",
     "expected_files": ["app/flavor/FlavorGame.tsx"],
+    "repo": "mtgdle"
+  },
+  {
+    "query": "MTG art crop zoom reveal guessing game",
+    "expected_files": ["app/art/ArtGame.tsx"],
+    "repo": "mtgdle"
+  },
+  {
+    "query": "card name search autocomplete filter input selection",
+    "expected_files": ["components/CardSearch.tsx"],
     "repo": "mtgdle"
   },
   {
@@ -75,6 +125,16 @@
     "repo": "tower-of-evolon"
   },
   {
+    "query": "player character movement shooting projectile GDScript input",
+    "expected_files": ["Player/Player.gd"],
+    "repo": "tower-of-evolon"
+  },
+  {
+    "query": "projectile area2D collision damage on hit animated",
+    "expected_files": ["Player/BasicAttack.gd"],
+    "repo": "tower-of-evolon"
+  },
+  {
     "query": "REST inventory controller endpoint",
     "expected_files": ["src/main/kotlin/org/hyvitech/toebackend/inventory/InventoryController.kt"],
     "repo": "tower-of-evolon-backend"
@@ -82,6 +142,16 @@
   {
     "query": "global exception handler error response",
     "expected_files": ["src/main/kotlin/org/hyvitech/toebackend/exception/GlobalExceptionHandler.kt"],
+    "repo": "tower-of-evolon-backend"
+  },
+  {
+    "query": "player entity data class MongoDB document annotation",
+    "expected_files": ["src/main/kotlin/org/hyvitech/toebackend/player/Player.kt"],
+    "repo": "tower-of-evolon-backend"
+  },
+  {
+    "query": "player repository MongoDB findByPlayerId Spring",
+    "expected_files": ["src/main/kotlin/org/hyvitech/toebackend/player/PlayerRepository.kt"],
     "repo": "tower-of-evolon-backend"
   },
   {
@@ -95,6 +165,21 @@
     "repo": "svelte-radio"
   },
   {
+    "query": "radio stream audio play pause volume mute Svelte",
+    "expected_files": ["src/lib/components/organisms/Player.svelte"],
+    "repo": "svelte-radio"
+  },
+  {
+    "query": "favorite station toggle localStorage Svelte writable store",
+    "expected_files": ["src/lib/utils/favorites.js"],
+    "repo": "svelte-radio"
+  },
+  {
+    "query": "selected station volume persist writable localStorage",
+    "expected_files": ["src/lib/utils/playerState.js"],
+    "repo": "svelte-radio"
+  },
+  {
     "query": "internationalization i18n locale setup",
     "expected_files": ["src/lib/i18n.js"],
     "repo": "riftracoons-web"
@@ -102,6 +187,21 @@
   {
     "query": "server side hooks SvelteKit",
     "expected_files": ["src/hooks.server.js"],
+    "repo": "riftracoons-web"
+  },
+  {
+    "query": "navbar hamburger mobile menu language switcher DE EN",
+    "expected_files": ["src/lib/components/Navbar.svelte"],
+    "repo": "riftracoons-web"
+  },
+  {
+    "query": "SvelteKit root layout intersection observer fade animation",
+    "expected_files": ["src/routes/+layout.svelte"],
+    "repo": "riftracoons-web"
+  },
+  {
+    "query": "team teaser card role pills TOP JGL MID ADC SUP lol-main lol-academy",
+    "expected_files": ["src/routes/+page.svelte"],
     "repo": "riftracoons-web"
   }
 ]
