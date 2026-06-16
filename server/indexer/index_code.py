@@ -214,7 +214,7 @@ def main():
                     continue
 
             points = []
-            for chunk in chunk_file(path, name):
+            for chunk in chunk_file(path, name, base_dir=repo_path):
                 cid = int(hashlib.md5(
                     f"{chunk['repo']}:{chunk['file']}:{chunk['start_line']}".encode()
                 ).hexdigest()[:8], 16)
