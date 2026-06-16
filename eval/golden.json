@@ -263,5 +263,100 @@
     "query": "station browser API search pagination load more results",
     "expected_files": ["src/lib/components/organisms/StationList.svelte"],
     "repo": "svelte-radio"
+  },
+  {
+    "query": "uvicorn startup server routing middleware mount threads banner",
+    "expected_files": ["server/mcp/server.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "onboarding CLAUDE.md template merge cortex section preferences",
+    "expected_files": ["server/mcp/onboarding.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "HTML CSS JS dashboard embedded template SVG logo D3",
+    "expected_files": ["server/mcp/template.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "server notes indexer heading chunk markdown tags modified_at upsert",
+    "expected_files": ["server/indexer/index.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "code indexer clone pull repo embed sparse upsert Qdrant",
+    "expected_files": ["server/indexer/index_code.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "local MCP server stdio tools switch workspace search notes code",
+    "expected_files": ["local/cortex/mcp_server.py"],
+    "repo": "cortex"
+  },
+  {
+    "query": "MTG daily card deterministic seed epoch day index mode offset",
+    "expected_files": ["lib/daily.ts"],
+    "repo": "mtgdle"
+  },
+  {
+    "query": "MTG Card interface TypeScript color identity rarity mana cost type line",
+    "expected_files": ["lib/types.ts"],
+    "repo": "mtgdle"
+  },
+  {
+    "query": "item loot float animation pickup collect click GDScript Area2D",
+    "expected_files": ["Enemy/Item.gd"],
+    "repo": "tower-of-evolon"
+  },
+  {
+    "query": "inventory item MongoDB document stackable slot quantity acquiredAt",
+    "expected_files": ["src/main/kotlin/org/hyvitech/toebackend/inventory/InventoryItem.kt"],
+    "repo": "tower-of-evolon-backend"
+  },
+  {
+    "query": "inventory service add item stackable stack fill slot Spring",
+    "expected_files": ["src/main/kotlin/org/hyvitech/toebackend/inventory/InventoryService.kt"],
+    "repo": "tower-of-evolon-backend"
+  },
+  {
+    "query": "inventory repository findByPlayerId findAllByPlayerIdAndItemId MongoDB Spring",
+    "expected_files": ["src/main/kotlin/org/hyvitech/toebackend/inventory/InventoryRepository.kt"],
+    "repo": "tower-of-evolon-backend"
+  },
+  {
+    "query": "station card name votes tags online status star favorite molecule",
+    "expected_files": ["src/lib/components/molecules/StationCard.svelte"],
+    "repo": "svelte-radio"
+  },
+  {
+    "query": "radio app root tab search favorites layout Svelte entry",
+    "expected_files": ["src/App.svelte"],
+    "repo": "svelte-radio"
+  },
+  {
+    "query": "news articles tag filter published fetch page Svelte",
+    "expected_files": ["src/routes/news/+page.svelte"],
+    "repo": "riftracoons-web"
+  },
+  {
+    "query": "contact form tryout subject rank email textarea submit",
+    "expected_files": ["src/routes/contact/+page.svelte"],
+    "repo": "riftracoons-web"
+  },
+  {
+    "query": "admin panel news CRUD publish toggle teams table management",
+    "expected_files": ["src/routes/admin/+page.svelte"],
+    "repo": "riftracoons-web"
+  },
+  {
+    "query": "server data readJSON writeJSON isAuth seed JSON file persistence",
+    "expected_files": ["src/lib/server/data.js"],
+    "repo": "riftracoons-web"
+  },
+  {
+    "query": "SvelteKit API endpoint teams players POST create server route",
+    "expected_files": ["src/routes/api/teams/[team]/players/+server.js"],
+    "repo": "riftracoons-web"
   }
 ]
