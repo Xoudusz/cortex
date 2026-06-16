@@ -21,6 +21,16 @@ from .indexer import index_path
 
 mcp = FastMCP("cortex")
 
+
+def _log_search(tool: str, query: str, top: list) -> None:
+    try:
+        entry = {"ts": time.time(), "tool": tool, "query": query, "top": top}
+        with open(data_dir() / "search_log.jsonl", "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
 _reindex_state: dict = {
     "running": False, "started_at": None, "output": [], "error": None, "done": False,
 }
@@ -119,6 +129,9 @@ def search_notes(query: str, limit: int = 5) -> str:
         parts.append(f"**{p['file']} > {p['heading']}** (score: {round(r.score, 3)}){tag_str}\n\n{p['text']}")
         matched_files.append(p.get("file", ""))
         matched_scores.append(r.score)
+    _log_search("search_notes", query, [
+        {"file": f, "score": round(s, 3)} for f, s in zip(matched_files, matched_scores)
+    ])
     ppr = _ppr_block(matched_files, matched_scores)
     if ppr:
         parts.append(ppr)
@@ -175,6 +188,10 @@ def search_code(query: str, limit: int = 5) -> str:
         if len(deduped) >= limit:
             break
     _stats["total_results_code"] += len(deduped)
+    _log_search("search_code", query, [
+        {"repo": r.payload.get("repo", ""), "file": r.payload.get("file", ""), "score": round(bs, 3)}
+        for bs, r, _ in deduped
+    ])
     parts = []
     for boosted_score, r, file_meta in deduped:
         p = r.payload

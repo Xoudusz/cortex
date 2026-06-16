@@ -39,6 +39,15 @@ log = logging.getLogger("cortex")
 mcp = FastMCP("cortex", host=HOST, port=PORT)
 
 
+def _log_search(tool: str, query: str, top: list) -> None:
+    try:
+        entry = {"ts": time.time(), "tool": tool, "query": query, "top": top}
+        with open(DATA_DIR / "search_log.jsonl", "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
 def _augment_with_ppr(matched_files: list, matched_scores: list, graph_path) -> str | None:
     """Run PPR over wikilinks; return formatted extra block or None. Updates _stats counters."""
     try:
@@ -122,6 +131,9 @@ def search_notes(query: str, limit: int = 5) -> str:
         )
         matched_files.append(p.get("file", ""))
         matched_scores.append(r.score)
+    _log_search("search_notes", query, [
+        {"file": f, "score": round(s, 3)} for f, s in zip(matched_files, matched_scores)
+    ])
     ppr_block = _augment_with_ppr(matched_files, matched_scores, _workspace_data_dir(ws) / "graph_notes.json")
     if ppr_block:
         parts.append(ppr_block)
@@ -174,6 +186,10 @@ def search_code(query: str, limit: int = 5) -> str:
         if len(deduped) >= limit:
             break
     _stats["total_results_code"] += len(deduped)
+    _log_search("search_code", query, [
+        {"repo": r.payload.get("repo", ""), "file": r.payload.get("file", ""), "score": round(bs, 3)}
+        for bs, r, _ in deduped
+    ])
     parts = []
     for boosted_score, r, file_meta in deduped:
         p = r.payload
