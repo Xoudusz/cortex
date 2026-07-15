@@ -231,38 +231,55 @@ body { background: #111318; color: #e2e8f0; font-family: -apple-system, BlinkMac
 h1 { font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #c084fc, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 1rem; }
 p { font-size: 0.9rem; color: #8896a8; }
 .check { font-size: 2rem; margin-bottom: 1rem; }
-.url-section { margin-top: 1.5rem; text-align: left; }
-.url-label { font-size: 0.8rem; color: #8896a8; margin-bottom: 0.4rem; }
-.url-box { background: #111318; border: 1px solid #2d3248; border-radius: 6px; padding: 0.75rem; font-family: monospace; font-size: 0.72rem; color: #c084fc; word-break: break-all; cursor: pointer; margin-bottom: 0.75rem; }
+.section { margin-top: 1.25rem; text-align: left; }
+.label { font-size: 0.75rem; color: #8896a8; margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.code-box { background: #111318; border: 1px solid #a78bfa; border-radius: 6px; padding: 0.75rem; font-family: monospace; font-size: 0.8rem; color: #c084fc; word-break: break-all; cursor: pointer; margin-bottom: 0.6rem; }
+.url-box { background: #111318; border: 1px solid #2d3248; border-radius: 6px; padding: 0.6rem 0.75rem; font-family: monospace; font-size: 0.68rem; color: #4a5568; word-break: break-all; cursor: pointer; margin-bottom: 0.6rem; }
 button { width: 100%; background: #a78bfa; border: none; border-radius: 6px; color: #111318; font-weight: 700; padding: 0.6rem; cursor: pointer; font-size: 0.85rem; }
+button.secondary { background: #2d3248; color: #8896a8; margin-top: 0.4rem; }
 button:hover { background: #c084fc; }
-.copied { color: #4ade80; font-size: 0.8rem; text-align: center; margin-top: 0.5rem; display: none; }
+button.secondary:hover { background: #3d4258; }
+.copied { color: #4ade80; font-size: 0.8rem; text-align: center; margin-top: 0.4rem; display: none; }
 </style>
 </head>
 <body>
 <div class="card">
   <div class="check">✓</div>
   <h1>Cortex</h1>
-  <p>Authorization complete. If Claude Code is still waiting, copy this URL and paste it in:</p>
-  <div class="url-section">
-    <div class="url-label">Callback URL</div>
-    <div class="url-box" id="cb" onclick="copy()">__CALLBACK_URL__</div>
-    <button onclick="copy()">Copy to clipboard</button>
-    <p class="copied" id="ok">Copied!</p>
+  <p>Authorization complete. Paste the code into Claude Code if it's still waiting.</p>
+  <div class="section">
+    <div class="label">Authorization Code</div>
+    <div class="code-box" id="code" onclick="copyCode()">__CODE__</div>
+    <button onclick="copyCode()">Copy Code</button>
+    <p class="copied" id="ok1">Copied!</p>
+  </div>
+  <div class="section">
+    <div class="label">Full Callback URL (if needed)</div>
+    <div class="url-box" id="cb" onclick="copyUrl()">__CALLBACK_URL__</div>
+    <button class="secondary" onclick="copyUrl()">Copy Full URL</button>
+    <p class="copied" id="ok2">Copied!</p>
   </div>
 </div>
 <script>
-function copy() {
+function copyCode() {
+  navigator.clipboard.writeText(document.getElementById('code').innerText);
+  document.getElementById('ok1').style.display = 'block';
+}
+function copyUrl() {
   navigator.clipboard.writeText(document.getElementById('cb').innerText);
-  document.getElementById('ok').style.display = 'block';
+  document.getElementById('ok2').style.display = 'block';
 }
 </script>
 </body>
 </html>"""
 
 
-def _relay_success_page(callback_url: str) -> str:
-    return _RELAY_SUCCESS_TEMPLATE.replace("__CALLBACK_URL__", callback_url)
+def _relay_success_page(code: str, callback_url: str) -> str:
+    return (
+        _RELAY_SUCCESS_TEMPLATE
+        .replace("__CODE__", code)
+        .replace("__CALLBACK_URL__", callback_url)
+    )
 
 
 def _render_form(
@@ -368,7 +385,7 @@ async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | 
                 log.info("[oauth] relayed callback to %s", target)
             except Exception as e:
                 log.warning("[oauth] relay to %s failed: %s", target, e)
-        return HTMLResponse(_relay_success_page(callback_url))
+        return HTMLResponse(_relay_success_page(code, callback_url))
 
     return RedirectResponse(redirect_uri + sep + params, status_code=302)
 
