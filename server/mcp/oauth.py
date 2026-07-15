@@ -210,7 +210,7 @@ button:hover { background: #c084fc; }
 </html>"""
 
 
-_RELAY_SUCCESS_PAGE = """\
+_RELAY_SUCCESS_TEMPLATE = """\
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -221,20 +221,42 @@ _RELAY_SUCCESS_PAGE = """\
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: #111318; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-.card { background: #1c2030; border: 1px solid #2d3248; border-radius: 12px; padding: 2rem; width: 100%; max-width: 360px; text-align: center; }
+.card { background: #1c2030; border: 1px solid #2d3248; border-radius: 12px; padding: 2rem; width: 100%; max-width: 480px; text-align: center; }
 h1 { font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #c084fc, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 1rem; }
 p { font-size: 0.9rem; color: #8896a8; }
 .check { font-size: 2rem; margin-bottom: 1rem; }
+.url-section { margin-top: 1.5rem; text-align: left; }
+.url-label { font-size: 0.8rem; color: #8896a8; margin-bottom: 0.4rem; }
+.url-box { background: #111318; border: 1px solid #2d3248; border-radius: 6px; padding: 0.75rem; font-family: monospace; font-size: 0.72rem; color: #c084fc; word-break: break-all; cursor: pointer; margin-bottom: 0.75rem; }
+button { width: 100%; background: #a78bfa; border: none; border-radius: 6px; color: #111318; font-weight: 700; padding: 0.6rem; cursor: pointer; font-size: 0.85rem; }
+button:hover { background: #c084fc; }
+.copied { color: #4ade80; font-size: 0.8rem; text-align: center; margin-top: 0.5rem; display: none; }
 </style>
 </head>
 <body>
 <div class="card">
   <div class="check">✓</div>
   <h1>Cortex</h1>
-  <p>Authorization complete — you can close this tab.</p>
+  <p>Authorization complete. If Claude Code is still waiting, copy this URL and paste it in:</p>
+  <div class="url-section">
+    <div class="url-label">Callback URL</div>
+    <div class="url-box" id="cb" onclick="copy()">__CALLBACK_URL__</div>
+    <button onclick="copy()">Copy to clipboard</button>
+    <p class="copied" id="ok">Copied!</p>
+  </div>
 </div>
+<script>
+function copy() {
+  navigator.clipboard.writeText(document.getElementById('cb').innerText);
+  document.getElementById('ok').style.display = 'block';
+}
+</script>
 </body>
 </html>"""
+
+
+def _relay_success_page(callback_url: str) -> str:
+    return _RELAY_SUCCESS_TEMPLATE.replace("__CALLBACK_URL__", callback_url)
 
 
 def _render_form(
@@ -328,6 +350,7 @@ async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | 
     params = urllib.parse.urlencode({"code": code, **({"state": state} if state else {})})
 
     if redirect_uri.startswith("http://localhost:"):
+        callback_url = redirect_uri + sep + params
         client_data = _store["clients"].get(client_id, {})
         client_host = client_data.get("client_host", "")
         if client_host:
@@ -339,7 +362,7 @@ async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | 
                 log.info("[oauth] relayed callback to %s", target)
             except Exception as e:
                 log.warning("[oauth] relay to %s failed: %s", target, e)
-            return HTMLResponse(_RELAY_SUCCESS_PAGE)
+        return HTMLResponse(_relay_success_page(callback_url))
 
     return RedirectResponse(redirect_uri + sep + params, status_code=302)
 
