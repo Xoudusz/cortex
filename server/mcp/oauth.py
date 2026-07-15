@@ -160,7 +160,13 @@ async def register(request: Request) -> JSONResponse:
         "token_endpoint_auth_method": "none",
     }
     if any("localhost" in uri for uri in redirect_uris):
-        client["client_host"] = request.client.host if request.client else ""
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        real_ip = request.headers.get("x-real-ip", "")
+        client["client_host"] = (
+            forwarded_for.split(",")[0].strip()
+            or real_ip
+            or (request.client.host if request.client else "")
+        )
     _store["clients"][client_id] = client
     _save()
     log.info("[oauth] registered client %s (%s) host=%s", client_id, client.get("client_name"), client.get("client_host", ""))
