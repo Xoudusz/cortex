@@ -3,7 +3,6 @@
 import json
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -19,6 +18,7 @@ from .config import (
 from .embedder import embed, sparse_embed
 from .state import _stats, get_graph_meta, save_stats, invalidate_graph_cache
 from .indexer import index_path
+from .core.formatters import format_notes_parts, format_code_results, fmt_stats
 
 mcp = FastMCP("cortex")
 
@@ -107,16 +107,7 @@ def _search_notes(query: str, limit: int = 5):
     if not results:
         return "No results found.", [], []
     _stats["total_results_notes"] += len(results)
-    parts = []
-    matched_files = []
-    matched_scores = []
-    for r in results:
-        p = r.payload
-        tags = p.get("tags", [])
-        tag_str = f" `{'`, `'.join(tags)}`" if tags else ""
-        parts.append(f"**{p['file']} > {p['heading']}** (score: {round(r.score, 3)}){tag_str}\n\n{p['text']}")
-        matched_files.append(p.get("file", ""))
-        matched_scores.append(r.score)
+    parts, matched_files, matched_scores = format_notes_parts(results)
     ppr = _ppr_block(matched_files, matched_scores)
     if ppr:
         parts.append(ppr)
@@ -170,23 +161,7 @@ def _search_code(query: str, limit: int = 5):
         {"repo": r.payload.get("repo", ""), "file": r.payload.get("file", ""), "score": round(bs, 3)}
         for bs, r, _ in deduped
     ]
-    parts = []
-    for boosted_score, r, file_meta in deduped:
-        p = r.payload
-        centrality = file_meta.get("centrality")
-        community = file_meta.get("community_id")
-        header = (
-            f"**{p['repo']}/{p['file']}** "
-            f"lines {p['start_line']}-{p['end_line']} "
-            f"({p.get('language', '')}) — score: {round(boosted_score, 3)}"
-        )
-        if centrality is not None:
-            header += f" · centrality: {centrality}"
-        if community is not None:
-            header += f" · community: {community}"
-        url = p.get("github_url", "")
-        parts.append(f"{header}\n{url}\n\n{p['text']}" if url else f"{header}\n\n{p['text']}")
-    out = "\n\n---\n\n".join(parts)
+    out = format_code_results(deduped)
     _stats["context_tokens_code"] += len(out) // 4
     return out, log_entries
 
@@ -290,34 +265,9 @@ def get_stats(all: bool = False) -> str:
             return "No persisted stats found."
         blocks = []
         for v in sorted(versions):
-            s = versions[v]
-            blocks.append(_fmt_stats(v, s, current=(v == VERSION)))
+            blocks.append(fmt_stats(v, versions[v], current=(v == VERSION)))
         return "\n\n".join(blocks)
-    return _fmt_stats(VERSION, _stats, current=True)
-
-
-def _fmt_stats(v: str, s: dict, current: bool = False) -> str:
-    total = s.get("search_code_calls", 0) + s.get("search_notes_calls", 0)
-    ppr_rate = f"{s['ppr_fires'] / s['search_notes_calls'] * 100:.1f}%" if s.get("search_notes_calls") else "—"
-    lift_avg = round(s["centrality_lift_total"] / s["centrality_lift_count"], 4) if s.get("centrality_lift_count") else 0
-    label = f"{v} (current)" if current else v
-    lines = [label]
-    started = s.get("started_at", "")
-    if current and started:
-        try:
-            delta = datetime.now(timezone.utc) - datetime.fromisoformat(started)
-            h, rem = divmod(int(delta.total_seconds()), 3600)
-            m = rem // 60
-            lines.append(f"  uptime: {h}h {m}m")
-        except Exception:
-            pass
-    lines += [
-        f"  searches: code={s.get('search_code_calls', 0)} notes={s.get('search_notes_calls', 0)}  total={total}",
-        f"  centrality lift avg: {lift_avg} (across {s.get('centrality_lift_count', 0)} results)",
-        f"  PPR: {s.get('ppr_fires', 0)} fires ({ppr_rate} of note searches) · +{s.get('ppr_results_added', 0)} results",
-        f"  reindexes: {s.get('reindex_count', 0)}",
-    ]
-    return "\n".join(lines)
+    return fmt_stats(VERSION, _stats, current=True)
 
 
 @mcp.tool()
