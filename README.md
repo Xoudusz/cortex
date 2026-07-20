@@ -32,12 +32,6 @@ cortex index ~/notes
 cortex index ~/projects/my-app
 ```
 
-**Legacy CPU (no SSE4.2)?** Use the `[legacy]` extra with Python 3.12:
-```bash
-pipx install "cortex-local[legacy]" --python python3.12
-cortex install
-```
-
 ---
 
 ## MCP tools
