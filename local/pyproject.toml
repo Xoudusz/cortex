@@ -14,10 +14,9 @@ dependencies = [
     "fastembed>=0.4.0",
     "click>=8.0.0",
     "networkx>=3.0",
+    "watchdog>=3.0",
+    "tqdm>=4.0",
 ]
-
-[project.optional-dependencies]
-legacy = ["numpy==1.26.4"]
 
 [project.scripts]
 cortex = "cortex.cli:cli"

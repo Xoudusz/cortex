@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Source code chunking — tree-sitter semantic parsing with sliding-window fallback."""
 
+import fnmatch
 import os
 from pathlib import Path
 
@@ -15,6 +16,10 @@ LANG_MAP = {
     ".kt": "kotlin", ".kts": "kotlin", ".gd": "gdscript",
     ".yml": "yaml", ".yaml": "yaml",
 }
+
+def _is_excluded(rel: str, patterns: list) -> bool:
+    return any(fnmatch.fnmatch(rel, p) for p in patterns)
+
 
 CHUNK_LINES = 30
 OVERLAP_LINES = 5

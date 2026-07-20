@@ -4,6 +4,8 @@ import hashlib
 import re
 from pathlib import Path
 
+from tqdm import tqdm
+
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance, FieldCondition, Filter, FilterSelector,
@@ -12,7 +14,7 @@ from qdrant_client.models import (
 
 from .config import qdrant_path, data_dir, cache_file, VECTOR_SIZE, migrate_legacy
 from .embedder import embed, sparse_embed
-from .core.chunker import chunk_file, CODE_EXTS, SKIP_DIRS
+from .core.chunker import chunk_file, CODE_EXTS, SKIP_DIRS, _is_excluded
 from .core.cache import load_cache, save_cache
 from .core import graph as _graph
 
@@ -110,8 +112,11 @@ def _chunk_id(file: str, heading: str) -> int:
     return int(hashlib.md5(f"{file}:{heading}".encode()).hexdigest()[:8], 16)
 
 
-def index_notes(notes_dir: Path) -> int:
+def index_notes(notes_dir: Path, show_progress: bool = False) -> int:
     """Index all .md files in notes_dir into the 'notes' collection. Returns chunk count."""
+    from .config import get_config
+    exclude_patterns = get_config()["index"]["exclude_patterns"]
+
     client = _qdrant()
     _ensure_collection(client, "notes")
     use_sparse = _sparse_available()
@@ -126,11 +131,19 @@ def index_notes(notes_dir: Path) -> int:
     total = 0
     cached = 0
 
-    for path in md_files:
+    for path in tqdm(md_files, desc="notes", disable=not show_progress):
         rel = str(path.relative_to(notes_dir))
+        if _is_excluded(rel, exclude_patterns):
+            continue
         mtime = path.stat().st_mtime
-        if cache.get(rel) == mtime:
-            new_cache[rel] = mtime
+        entry = cache.get(rel, {})
+        if entry.get("mtime") == mtime:
+            new_cache[rel] = entry
+            cached += 1
+            continue
+        content_hash = hashlib.sha1(path.read_bytes()).hexdigest()[:16]
+        if entry.get("hash") == content_hash:
+            new_cache[rel] = {"mtime": mtime, "hash": content_hash}
             cached += 1
             continue
         chunks = _chunk_markdown(path, notes_dir)
@@ -139,8 +152,9 @@ def index_notes(notes_dir: Path) -> int:
         if points:
             client.upsert("notes", points)
             total += len(points)
-            print(f"  {rel}: {len(points)} chunk(s)", flush=True)
-        new_cache[rel] = mtime
+            if not show_progress:
+                print(f"  {rel}: {len(points)} chunk(s)", flush=True)
+        new_cache[rel] = {"mtime": mtime, "hash": content_hash}
 
     save_cache("notes", new_cache, cache_file())
     print(f"Done. {total} chunks indexed, {cached}/{len(md_files)} files cached.", flush=True)
@@ -160,8 +174,11 @@ def _code_chunk_id(repo: str, file: str, start: int) -> int:
     return int(hashlib.md5(f"{repo}:{file}:{start}".encode()).hexdigest()[:8], 16)
 
 
-def index_code(code_dir: Path) -> int:
+def index_code(code_dir: Path, show_progress: bool = False) -> int:
     """Index all code files in code_dir into the 'code' collection. Returns chunk count."""
+    from .config import get_config
+    exclude_patterns = get_config()["index"]["exclude_patterns"]
+
     repo_name = code_dir.name
     client = _qdrant()
     _ensure_collection(client, "code")
@@ -171,6 +188,7 @@ def index_code(code_dir: Path) -> int:
         p for p in code_dir.rglob("*")
         if p.is_file() and p.suffix in CODE_EXTS
         and not any(s in p.parts for s in SKIP_DIRS)
+        and not _is_excluded(str(p.relative_to(code_dir)), exclude_patterns)
     ]
 
     cache = load_cache("code", cache_file())
@@ -181,13 +199,16 @@ def index_code(code_dir: Path) -> int:
     cached = 0
     file_point_ids: dict = {}
 
-    for i, path in enumerate(code_files):
-        if i % 10 == 0 and i > 0:
-            print(f"  {repo_name}: {i}/{len(code_files)} files, {total} chunks...", flush=True)
-
+    for path in tqdm(code_files, desc=repo_name, disable=not show_progress):
         cache_key = f"{repo_name}/{str(path.relative_to(code_dir))}"
         mtime = path.stat().st_mtime
-        if cache.get(cache_key) == mtime:
+        entry = cache.get(cache_key, {})
+        if entry.get("mtime") == mtime:
+            cached += 1
+            continue
+        content_hash = hashlib.sha1(path.read_bytes()).hexdigest()[:16]
+        if entry.get("hash") == content_hash:
+            new_cache[cache_key] = {"mtime": mtime, "hash": content_hash}
             cached += 1
             continue
 
@@ -199,7 +220,7 @@ def index_code(code_dir: Path) -> int:
         if points:
             client.upsert("code", points)
             total += len(points)
-            new_cache[cache_key] = mtime
+            new_cache[cache_key] = {"mtime": mtime, "hash": content_hash}
 
     save_cache("code", new_cache, cache_file())
     print(f"  {repo_name}: {total} chunks from {len(code_files) - cached} files ({cached} cached)", flush=True)
@@ -233,7 +254,7 @@ def index_code(code_dir: Path) -> int:
     return total
 
 
-def index_path(path: Path) -> None:
+def index_path(path: Path, show_progress: bool = False) -> None:
     """Index a path — .md files as notes, code files as code."""
     path = path.resolve()
     data_dir().mkdir(parents=True, exist_ok=True)
@@ -245,11 +266,11 @@ def index_path(path: Path) -> None:
 
     if md_files:
         print(f"\nIndexing notes from {path} ({len(md_files)} .md files)...")
-        index_notes(path)
+        index_notes(path, show_progress=show_progress)
 
     if code_files:
         print(f"\nIndexing code from {path} ({len(code_files)} files)...")
-        index_code(path)
+        index_code(path, show_progress=show_progress)
 
     if not md_files and not code_files:
         print(f"No indexable files found in {path}")

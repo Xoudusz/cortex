@@ -1,14 +1,17 @@
 """cortex CLI — index <path> and serve (stdio MCP)."""
 
+import json
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 import click
 
 from .config import (
     WORKSPACES_DIR, get_active_workspace, set_active_workspace, get_workspace_dir,
+    data_dir, save_last_indexed_path,
 )
 
 
@@ -19,10 +22,12 @@ def cli() -> None:
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
-def index(path: str) -> None:
+@click.option("--progress/--no-progress", default=True, help="Show tqdm progress bar.")
+def index(path: str, progress: bool) -> None:
     """Index PATH (notes and/or code) into ~/.cortex."""
     from .indexer import index_path
-    index_path(Path(path))
+    index_path(Path(path), show_progress=progress)
+    save_last_indexed_path(path)
 
 
 @cli.command()
@@ -115,6 +120,44 @@ def workspace_delete(name: str) -> None:
 def workspace_current() -> None:
     """Print the active workspace name."""
     click.echo(get_active_workspace())
+
+
+@cli.command("search-log")
+@click.option("--top", default=10, show_default=True, help="Number of top queries to show.")
+def search_log_cmd(top: int) -> None:
+    """Show search query analytics from the search log."""
+    log_file = data_dir() / "search_log.jsonl"
+    if not log_file.exists():
+        click.echo("No search log found. Run some searches first.")
+        return
+    queries = []
+    zero_result_queries = []
+    tool_counts: Counter = Counter()
+    with open(log_file) as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except Exception:
+                continue
+            q = entry.get("query", "")
+            queries.append(q)
+            tool_counts[entry.get("tool", "unknown")] += 1
+            if not entry.get("top"):
+                zero_result_queries.append(q)
+    if not queries:
+        click.echo("Search log is empty.")
+        return
+    click.echo(f"Total searches: {len(queries)}")
+    for tool, count in sorted(tool_counts.items()):
+        click.echo(f"  {tool}: {count}")
+    click.echo(f"\nTop {top} queries:")
+    for q, n in Counter(queries).most_common(top):
+        click.echo(f"  {n:3d}x  {q}")
+    if zero_result_queries:
+        unique_zero = sorted(set(zero_result_queries))
+        click.echo(f"\nZero-result queries ({len(unique_zero)} unique):")
+        for q in unique_zero[:20]:
+            click.echo(f"  {q}")
 
 
 @cli.command("install")

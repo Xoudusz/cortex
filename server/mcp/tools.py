@@ -83,21 +83,7 @@ def _augment_with_ppr(matched_files: list, matched_scores: list, graph_path) -> 
     return None
 
 
-@mcp.tool()
-def search_notes(query: str, limit: int = 5) -> str:
-    """Search the user's personal Obsidian knowledge base semantically.
-
-    Call this proactively whenever the user asks about:
-    - Their projects, plans, ideas, or roadmap items
-    - Personal context, goals, or decisions they may have documented
-    - How something in their setup works (server config, tools, workflows)
-    - Anything that sounds like it could be in personal notes
-
-    Returns matching note sections with file path, heading, score, and tags.
-    PPR over wikilinks surfaces related notes beyond direct vector matches.
-    Prefer this over asking the user to explain context they may have already written down.
-    """
-    _stats["search_notes_calls"] += 1
+def _search_notes(query: str, limit: int = 5) -> str:
     ws = get_active_workspace()
     coll = collection_name("notes", ws)
     client = QdrantClient(url=QDRANT_URL)
@@ -131,20 +117,15 @@ def search_notes(query: str, limit: int = 5) -> str:
         )
         matched_files.append(p.get("file", ""))
         matched_scores.append(r.score)
-    _log_search("search_notes", query, [
-        {"file": f, "score": round(s, 3)} for f, s in zip(matched_files, matched_scores)
-    ])
     ppr_block = _augment_with_ppr(matched_files, matched_scores, _workspace_data_dir(ws) / "graph_notes.json")
     if ppr_block:
         parts.append(ppr_block)
     out = "\n\n---\n\n".join(parts)
     _stats["context_tokens_notes"] += len(out) // 4
-    return out
+    return out, matched_files, matched_scores
 
 
-@mcp.tool(description=_build_search_code_description())
-def search_code(query: str, limit: int = 5) -> str:
-    _stats["search_code_calls"] += 1
+def _search_code(query: str, limit: int = 5) -> str:
     coll = collection_name("code", get_active_workspace())
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
@@ -164,7 +145,7 @@ def search_code(query: str, limit: int = 5) -> str:
     except Exception:
         results = client.query_points(coll, query=vector, limit=fetch_limit, with_payload=True).points
     if not results:
-        return "No results found."
+        return "No results found.", []
     scored = []
     for r in results:
         p = r.payload
@@ -186,10 +167,10 @@ def search_code(query: str, limit: int = 5) -> str:
         if len(deduped) >= limit:
             break
     _stats["total_results_code"] += len(deduped)
-    _log_search("search_code", query, [
+    log_entries = [
         {"repo": r.payload.get("repo", ""), "file": r.payload.get("file", ""), "score": round(bs, 3)}
         for bs, r, _ in deduped
-    ])
+    ]
     parts = []
     for boosted_score, r, file_meta in deduped:
         p = r.payload
@@ -208,7 +189,52 @@ def search_code(query: str, limit: int = 5) -> str:
         parts.append(f"{header}\n{url}\n\n{p['text']}" if url else f"{header}\n\n{p['text']}")
     out = "\n\n---\n\n".join(parts)
     _stats["context_tokens_code"] += len(out) // 4
+    return out, log_entries
+
+
+@mcp.tool()
+def search_notes(query: str, limit: int = 5) -> str:
+    """Search the user's personal Obsidian knowledge base semantically.
+
+    Call this proactively whenever the user asks about:
+    - Their projects, plans, ideas, or roadmap items
+    - Personal context, goals, or decisions they may have documented
+    - How something in their setup works (server config, tools, workflows)
+    - Anything that sounds like it could be in personal notes
+
+    Returns matching note sections with file path, heading, score, and tags.
+    PPR over wikilinks surfaces related notes beyond direct vector matches.
+    Prefer this over asking the user to explain context they may have already written down.
+    """
+    _stats["search_notes_calls"] += 1
+    out, matched_files, matched_scores = _search_notes(query, limit)
+    _log_search("search_notes", query, [
+        {"file": f, "score": round(s, 3)} for f, s in zip(matched_files, matched_scores)
+    ] if matched_files else [])
     return out
+
+
+@mcp.tool(description=_build_search_code_description())
+def search_code(query: str, limit: int = 5) -> str:
+    _stats["search_code_calls"] += 1
+    out, log_entries = _search_code(query, limit)
+    _log_search("search_code", query, log_entries)
+    return out
+
+
+@mcp.tool()
+def search_all(query: str, limit: int = 5) -> str:
+    """Search both notes and code simultaneously.
+
+    Use when unsure whether the answer is in notes or code,
+    or when you want a combined view across both collections.
+    """
+    _stats["search_notes_calls"] += 1
+    _stats["search_code_calls"] += 1
+    notes_out, matched_files, matched_scores = _search_notes(query, limit)
+    code_out, log_entries = _search_code(query, limit)
+    _log_search("search_all", query, log_entries)
+    return f"## Notes\n\n{notes_out}\n\n## Code\n\n{code_out}"
 
 
 @mcp.tool()

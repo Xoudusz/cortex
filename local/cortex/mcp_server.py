@@ -6,14 +6,15 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+
 from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
 from qdrant_client.models import Prefetch, Fusion, SparseVector
 
 from .config import (
-    qdrant_path, data_dir, VERSION, VECTOR_SIZE,
+    qdrant_path, data_dir, stats_file, VERSION, VECTOR_SIZE,
     WORKSPACES_DIR, get_active_workspace, set_active_workspace,
-    get_workspace_dir, PPR_THRESHOLD,
+    get_workspace_dir, PPR_THRESHOLD, get_config,
 )
 from .embedder import embed, sparse_embed
 from .state import _stats, get_graph_meta, save_stats, invalidate_graph_cache
@@ -86,20 +87,7 @@ def _ppr_block(matched_files: list, matched_scores: list) -> str | None:
 
 # ── Tools ────────────────────────────────────────────────────────────────────
 
-@mcp.tool()
-def search_notes(query: str, limit: int = 5) -> str:
-    """Search the user's personal knowledge base semantically.
-
-    Call this proactively whenever the user asks about:
-    - Their projects, plans, ideas, or roadmap items
-    - Personal context, goals, or decisions they may have documented
-    - How something in their setup works
-    - Anything that sounds like it could be in personal notes
-
-    Returns matching note sections with file path, heading, score, and tags.
-    PPR over wikilinks surfaces related notes beyond direct vector matches.
-    """
-    _stats["search_notes_calls"] += 1
+def _search_notes(query: str, limit: int = 5):
     client = _qdrant()
     vector = embed(query)
     try:
@@ -117,7 +105,7 @@ def search_notes(query: str, limit: int = 5) -> str:
     except Exception:
         results = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
     if not results:
-        return "No results found."
+        return "No results found.", [], []
     _stats["total_results_notes"] += len(results)
     parts = []
     matched_files = []
@@ -129,25 +117,15 @@ def search_notes(query: str, limit: int = 5) -> str:
         parts.append(f"**{p['file']} > {p['heading']}** (score: {round(r.score, 3)}){tag_str}\n\n{p['text']}")
         matched_files.append(p.get("file", ""))
         matched_scores.append(r.score)
-    _log_search("search_notes", query, [
-        {"file": f, "score": round(s, 3)} for f, s in zip(matched_files, matched_scores)
-    ])
     ppr = _ppr_block(matched_files, matched_scores)
     if ppr:
         parts.append(ppr)
     out = "\n\n---\n\n".join(parts)
     _stats["context_tokens_notes"] += len(out) // 4
-    return out
+    return out, matched_files, matched_scores
 
 
-@mcp.tool()
-def search_code(query: str, limit: int = 5) -> str:
-    """Search source code across indexed directories semantically.
-
-    Results are re-ranked by centrality (highly-imported files score higher).
-    Returns code chunks with file path, line numbers, language, score, centrality, and community.
-    """
-    _stats["search_code_calls"] += 1
+def _search_code(query: str, limit: int = 5):
     client = _qdrant()
     vector = embed(query)
     fetch_limit = min(limit * 3, 50)
@@ -166,7 +144,7 @@ def search_code(query: str, limit: int = 5) -> str:
     except Exception:
         results = client.query_points("code", query=vector, limit=fetch_limit, with_payload=True).points
     if not results:
-        return "No results found."
+        return "No results found.", []
     scored = []
     for r in results:
         p = r.payload
@@ -188,10 +166,10 @@ def search_code(query: str, limit: int = 5) -> str:
         if len(deduped) >= limit:
             break
     _stats["total_results_code"] += len(deduped)
-    _log_search("search_code", query, [
+    log_entries = [
         {"repo": r.payload.get("repo", ""), "file": r.payload.get("file", ""), "score": round(bs, 3)}
         for bs, r, _ in deduped
-    ])
+    ]
     parts = []
     for boosted_score, r, file_meta in deduped:
         p = r.payload
@@ -210,7 +188,56 @@ def search_code(query: str, limit: int = 5) -> str:
         parts.append(f"{header}\n{url}\n\n{p['text']}" if url else f"{header}\n\n{p['text']}")
     out = "\n\n---\n\n".join(parts)
     _stats["context_tokens_code"] += len(out) // 4
+    return out, log_entries
+
+
+@mcp.tool()
+def search_notes(query: str, limit: int = 5) -> str:
+    """Search the user's personal knowledge base semantically.
+
+    Call this proactively whenever the user asks about:
+    - Their projects, plans, ideas, or roadmap items
+    - Personal context, goals, or decisions they may have documented
+    - How something in their setup works
+    - Anything that sounds like it could be in personal notes
+
+    Returns matching note sections with file path, heading, score, and tags.
+    PPR over wikilinks surfaces related notes beyond direct vector matches.
+    """
+    _stats["search_notes_calls"] += 1
+    out, matched_files, matched_scores = _search_notes(query, limit)
+    _log_search("search_notes", query, [
+        {"file": f, "score": round(s, 3)} for f, s in zip(matched_files, matched_scores)
+    ])
     return out
+
+
+@mcp.tool()
+def search_code(query: str, limit: int = 5) -> str:
+    """Search source code across indexed directories semantically.
+
+    Results are re-ranked by centrality (highly-imported files score higher).
+    Returns code chunks with file path, line numbers, language, score, centrality, and community.
+    """
+    _stats["search_code_calls"] += 1
+    out, log_entries = _search_code(query, limit)
+    _log_search("search_code", query, log_entries)
+    return out
+
+
+@mcp.tool()
+def search_all(query: str, limit: int = 5) -> str:
+    """Search both notes and code simultaneously.
+
+    Use when unsure whether the answer is in notes or code,
+    or when you want a combined view across both collections.
+    """
+    _stats["search_notes_calls"] += 1
+    _stats["search_code_calls"] += 1
+    notes_out, matched_files, matched_scores = _search_notes(query, limit)
+    code_out, log_entries = _search_code(query, limit)
+    _log_search("search_all", query, log_entries)
+    return f"## Notes\n\n{notes_out}\n\n## Code\n\n{code_out}"
 
 
 @mcp.tool()
@@ -253,10 +280,10 @@ def get_stats(all: bool = False) -> str:
     all=False (default): current session stats.
     all=True: all persisted versions side-by-side.
     """
-    from .config import STATS_FILE
     if all:
         try:
-            versions = json.loads(STATS_FILE.read_text()).get("versions", {}) if STATS_FILE.exists() else {}
+            sf = stats_file()
+            versions = json.loads(sf.read_text()).get("versions", {}) if sf.exists() else {}
         except Exception:
             versions = {}
         if not versions:
@@ -438,4 +465,10 @@ def list_workspaces() -> str:
 
 def run() -> None:
     """Entry point for stdio MCP server."""
+    cfg = get_config()
+    if cfg["watch"]["enabled"]:
+        last = cfg["index"].get("last_path", "")
+        if last and Path(last).exists():
+            from .watcher import CortexWatcher
+            CortexWatcher(Path(last), cfg["watch"]["debounce_seconds"]).start()
     mcp.run(transport="stdio")

@@ -12,12 +12,13 @@ def _default_cache_file() -> Path:
 
 
 def load_cache(section: str, cache_file: Path | None = None) -> dict:
-    """Load {rel_path: mtime} for given section ('notes' or 'code')."""
+    """Load {rel_path: {"mtime": float, "hash": str}} for given section ('notes' or 'code')."""
     if cache_file is None:
         cache_file = _default_cache_file()
     try:
         if cache_file.exists():
-            return json.loads(cache_file.read_text()).get(section, {})
+            raw = json.loads(cache_file.read_text()).get(section, {})
+            return {k: v if isinstance(v, dict) else {"mtime": v, "hash": ""} for k, v in raw.items()}
     except Exception:
         pass
     return {}

@@ -11,15 +11,17 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, SparseVector, SparseVectorParams, VectorParams
 
 from cache import load_cache, save_cache
+from chunker import _is_excluded
 
-NOTES_DIR   = Path(os.environ.get("NOTES_PATH", "/notes"))
-OLLAMA_URL  = os.environ.get("OLLAMA_URL", "http://ollama:11434")
-QDRANT_URL  = os.environ.get("QDRANT_URL", "http://qdrant:6333")
-DATA_DIR    = Path(os.environ.get("REPOS_CONFIG", "/app/data/repos.json")).parent
-_WS         = os.environ.get("CORTEX_WORKSPACE", "default")
-COLLECTION  = "notes" if _WS == "default" else f"{_WS}_notes"
-EMBED_MODEL = "nomic-embed-text"
-VECTOR_SIZE = 768
+NOTES_DIR        = Path(os.environ.get("NOTES_PATH", "/notes"))
+OLLAMA_URL       = os.environ.get("OLLAMA_URL", "http://ollama:11434")
+QDRANT_URL       = os.environ.get("QDRANT_URL", "http://qdrant:6333")
+DATA_DIR         = Path(os.environ.get("REPOS_CONFIG", "/app/data/repos.json")).parent
+_WS              = os.environ.get("CORTEX_WORKSPACE", "default")
+COLLECTION       = "notes" if _WS == "default" else f"{_WS}_notes"
+EMBED_MODEL      = "nomic-embed-text"
+VECTOR_SIZE      = 768
+EXCLUDE_PATTERNS = [p for p in os.environ.get("EXCLUDE_PATTERNS", "").split(",") if p]
 
 
 def embed(text: str) -> list:
@@ -130,9 +132,18 @@ def main():
 
     for path in md_files:
         rel = str(path.relative_to(NOTES_DIR))
+        if _is_excluded(rel, EXCLUDE_PATTERNS):
+            continue
         mtime = path.stat().st_mtime
-        if cache.get(rel) == mtime:
-            new_cache[rel] = mtime
+        entry = cache.get(rel, {})
+        if entry.get("mtime") == mtime:
+            new_cache[rel] = entry
+            cached += 1
+            continue
+        content = path.read_bytes()
+        content_hash = hashlib.sha1(content).hexdigest()[:16]
+        if entry.get("hash") == content_hash:
+            new_cache[rel] = {"mtime": mtime, "hash": content_hash}
             cached += 1
             continue
 
@@ -155,7 +166,7 @@ def main():
             client.upsert(COLLECTION, points)
             total += len(points)
             print(f"  {rel}: {len(points)} chunk(s)", flush=True)
-        new_cache[rel] = mtime
+        new_cache[rel] = {"mtime": mtime, "hash": content_hash}
 
     save_cache("notes", new_cache)
     print(f"\nDone. {total} chunks indexed, {cached}/{len(md_files)} files cached (skipped).")

@@ -12,17 +12,18 @@ import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelector, MatchValue, PointStruct, SparseVector, SparseVectorParams, VectorParams
 
-from chunker import chunk_file, CODE_EXTS, SKIP_DIRS, REPOS_DIR
+from chunker import chunk_file, CODE_EXTS, SKIP_DIRS, REPOS_DIR, _is_excluded
 from cache import load_cache, save_cache
 
-OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://ollama:11434")
+OLLAMA_URL       = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 QDRANT_URL   = os.environ.get("QDRANT_URL", "http://qdrant:6333")
 REPOS_CONFIG = os.environ.get("REPOS_CONFIG", "/app/data/repos.json")
 DATA_DIR     = Path(REPOS_CONFIG).parent
 _WS          = os.environ.get("CORTEX_WORKSPACE", "default")
-COLLECTION   = "code" if _WS == "default" else f"{_WS}_code"
-EMBED_MODEL  = "nomic-embed-text"
-VECTOR_SIZE  = 768
+COLLECTION       = "code" if _WS == "default" else f"{_WS}_code"
+EMBED_MODEL      = "nomic-embed-text"
+VECTOR_SIZE      = 768
+EXCLUDE_PATTERNS = [p for p in os.environ.get("EXCLUDE_PATTERNS", "").split(",") if p]
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
@@ -186,6 +187,7 @@ def main():
                 p for p in repo_path.rglob("*")
                 if p.is_file() and p.suffix in CODE_EXTS
                 and not any(s in p.parts for s in SKIP_DIRS)
+                and not _is_excluded(str(p.relative_to(repo_path)), EXCLUDE_PATTERNS)
             ]
 
         if not incremental:
@@ -209,7 +211,13 @@ def main():
             if not incremental:
                 cache_key = f"{name}/{str(path.relative_to(repo_path))}"
                 mtime = path.stat().st_mtime
-                if file_cache.get(cache_key) == mtime:
+                entry = file_cache.get(cache_key, {})
+                if entry.get("mtime") == mtime:
+                    cached_files += 1
+                    continue
+                content_hash = hashlib.sha1(path.read_bytes()).hexdigest()[:16]
+                if entry.get("hash") == content_hash:
+                    new_file_cache[cache_key] = {"mtime": mtime, "hash": content_hash}
                     cached_files += 1
                     continue
 
@@ -230,7 +238,7 @@ def main():
                 client.upsert(COLLECTION, points)
                 total += len(points)
                 if not incremental:
-                    new_file_cache[cache_key] = mtime
+                    new_file_cache[cache_key] = {"mtime": mtime, "hash": content_hash}
 
         if not incremental:
             save_cache("code", new_file_cache)
