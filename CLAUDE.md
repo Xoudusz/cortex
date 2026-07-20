@@ -39,9 +39,9 @@ Auth: built-in OAuth 2.0 (Bearer token). Login at `/oauth/authorize` with `ADMIN
 ## Structure
 
 ```
-core/                   # shared lib — used by both server/ and local/
-  chunker.py            # tree-sitter semantic chunking + sliding-window fallback
-  cache.py              # load_cache / save_cache helpers
+core/                   # ONE shared lib — symlinked into local/cortex/core/
+  chunker.py            # tree-sitter chunking + sliding-window + _is_excluded()
+  cache.py              # load_cache / save_cache — {mtime, hash} format, backward-compat
   graph.py              # facade — re-exports from code_graph, notes_graph, global_graph
   code_graph.py         # import/call/inheritance edges, centrality, Louvain
   notes_graph.py        # Obsidian wikilink graph + PPR augmentation
@@ -69,12 +69,14 @@ server/
 local/                  # cortex PyPI package — pipx install, stdio MCP, no server needed
   pyproject.toml        # package metadata, entry point: cortex = cortex.cli:cli
   cortex/
-    cli.py              # cortex index <path>, cortex serve, cortex pull-models, cortex stats
-    mcp_server.py       # all 8 MCP tools, FastMCP stdio transport
-    indexer.py          # embedded Qdrant indexer (notes + code)
+    cli.py              # cortex index/serve/stats/search-log/workspace commands
+    mcp_server.py       # 12 MCP tools, FastMCP stdio transport
+    indexer.py          # embedded Qdrant indexer (notes + code), tqdm progress
     embedder.py         # fastembed dense (nomic-embed-text-v1.5) + BM25 sparse
-    config.py           # ~/.cortex paths, VECTOR_SIZE, VERSION
+    config.py           # ~/.cortex paths, config.toml (get_config, save_last_indexed_path)
     state.py            # graph cache, stats lifecycle
+    watcher.py          # CortexWatcher — debounced watchdog, auto-starts from cortex serve
+    core -> ../../core  # symlink — shared lib
 docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 ```
 
@@ -82,6 +84,7 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 
 - `search_notes(query, limit)` — semantic search over Obsidian notes + PPR wikilink augmentation
 - `search_code(query, limit)` — semantic search over source code + centrality re-ranking
+- `search_all(query, limit)` — search both collections simultaneously, combined output
 - `get_neighbors(file, repo)` — imports + imported-by for a file
 - `get_community(repo, community_id)` — all files in a Louvain cluster
 - `reindex(notes, code, repo, force?)` — async; `force=True` clears embed cache first (~10x slower)
@@ -119,10 +122,23 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant endpoint |
 | `NOTES_PATH` | `/notes` | Notes mount path |
 | `WATCH_DEBOUNCE` | `60` | Seconds to debounce watcher |
+| `EXCLUDE_PATTERNS` | — | Comma-separated glob patterns to skip (e.g. `*.log,tmp/*`) |
 | `GITHUB_TOKEN` | — | For cloning private repos |
 | `WEBHOOK_SECRET` | — | GitHub webhook signature secret |
 | `ADMIN_PASSWORD` | — | OAuth login password (required if auth enabled) |
 | `BASE_URL` | `http://localhost:8765` | Public URL for OAuth metadata |
+
+## Local mode config (~/.cortex/config.toml)
+
+```toml
+[watch]
+enabled = true          # auto-start watcher on cortex serve
+debounce_seconds = 2.0
+
+[index]
+last_path = ""          # auto-set by cortex index <path>
+exclude_patterns = []   # glob patterns, e.g. ["*.log", "tmp/*"]
+```
 
 ## Eval
 
