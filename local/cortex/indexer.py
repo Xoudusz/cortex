@@ -17,6 +17,7 @@ from .embedder import embed, sparse_embed
 from .core.chunker import chunk_file, CODE_EXTS, SKIP_DIRS, _is_excluded
 from .core.cache import load_cache, save_cache
 from .core import graph as _graph
+from .core import roslyn_analyzer as _roslyn
 
 
 def _qdrant() -> QdrantClient:
@@ -199,8 +200,13 @@ def index_code(code_dir: Path, show_progress: bool = False) -> int:
     cached = 0
     file_point_ids: dict = {}
 
+    roslyn_data: dict = {}
+    if _roslyn.is_available() and any(p.suffix == ".cs" for p in code_files):
+        roslyn_data = _roslyn.analyze_dir(code_dir)
+
     for path in tqdm(code_files, desc=repo_name, disable=not show_progress):
-        cache_key = f"{repo_name}/{str(path.relative_to(code_dir))}"
+        rel_path = str(path.relative_to(code_dir)).replace("\\", "/")
+        cache_key = f"{repo_name}/{rel_path}"
         mtime = path.stat().st_mtime
         entry = cache.get(cache_key, {})
         if entry.get("mtime") == mtime:
@@ -213,7 +219,7 @@ def index_code(code_dir: Path, show_progress: bool = False) -> int:
             continue
 
         points = []
-        for chunk in chunk_file(path, repo_name, base_dir=code_dir):
+        for chunk in chunk_file(path, repo_name, base_dir=code_dir, roslyn_data=roslyn_data.get(rel_path)):
             pid = _code_chunk_id(repo_name, chunk["file"], chunk["start_line"])
             points.append(_make_point(chunk["text"], pid, chunk, use_sparse))
             file_point_ids.setdefault(chunk["file"], []).append(pid)
@@ -226,10 +232,13 @@ def index_code(code_dir: Path, show_progress: bool = False) -> int:
     print(f"  {repo_name}: {total} chunks from {len(code_files) - cached} files ({cached} cached)", flush=True)
 
     all_files = {
-        str(p.relative_to(code_dir)) for p in code_files
+        str(p.relative_to(code_dir)).replace("\\", "/") for p in code_files
     }
     try:
         G = _graph.build_code_graph(code_dir, all_files)
+        if roslyn_data:
+            from .core.code_graph import inject_roslyn_edges
+            inject_roslyn_edges(G, roslyn_data, all_files)
         if G is not None:
             metadata = _graph.compute_code_metadata(G)
             _graph.persist_code_graph(G, metadata, repo_name, data_dir())

@@ -3,11 +3,36 @@
 
 import fnmatch
 import os
+import re as _re
 from pathlib import Path
+
+_RAZOR_BLOCK_RE = _re.compile(r'@(?:code|functions)\s*\{', _re.IGNORECASE)
+
+
+def _extract_razor_cs_blocks(source: str) -> list:
+    """Extract @code{} and @functions{} C# blocks from Razor markup using brace counting."""
+    blocks = []
+    for match in _RAZOR_BLOCK_RE.finditer(source):
+        open_pos = source.index('{', match.start())
+        depth = 0
+        j = open_pos
+        while j < len(source):
+            if source[j] == '{':
+                depth += 1
+            elif source[j] == '}':
+                depth -= 1
+                if depth == 0:
+                    start_line = source[:open_pos].count('\n') + 2  # line after opening {
+                    end_line = source[:j].count('\n') + 1           # line of closing }
+                    if end_line > start_line:
+                        blocks.append({"start_line": start_line, "end_line": end_line})
+                    break
+            j += 1
+    return blocks
 
 REPOS_DIR = Path(os.environ.get("REPOS_DIR", "/tmp/repos"))
 
-CODE_EXTS = {".js", ".ts", ".tsx", ".jsx", ".svelte", ".py", ".java", ".go", ".rs", ".css", ".html", ".kt", ".kts", ".gd", ".yml", ".yaml", ".cs"}
+CODE_EXTS = {".js", ".ts", ".tsx", ".jsx", ".svelte", ".py", ".java", ".go", ".rs", ".css", ".html", ".kt", ".kts", ".gd", ".yml", ".yaml", ".cs", ".razor", ".cshtml"}
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", ".svelte-kit", "__pycache__", ".gradle", "target", "bin", "obj"}
 LANG_MAP = {
     ".js": "javascript", ".ts": "typescript", ".tsx": "typescript",
@@ -15,6 +40,7 @@ LANG_MAP = {
     ".java": "java", ".go": "go", ".rs": "rust", ".css": "css", ".html": "html",
     ".kt": "kotlin", ".kts": "kotlin", ".gd": "gdscript",
     ".yml": "yaml", ".yaml": "yaml", ".cs": "csharp",
+    ".razor": "razor", ".cshtml": "cshtml",
 }
 
 def _is_excluded(rel: str, patterns: list) -> bool:
@@ -216,15 +242,17 @@ def _collect_semantic_nodes(node, target_types: set, depth: int = 0, max_depth: 
     return result
 
 
-def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_url_base: str = "") -> list:
+def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_url_base: str = "", roslyn_data: dict | None = None) -> list:
     """Chunk a source file into indexable segments.
 
     base_dir: directory to compute relative paths from (defaults to path.parent).
     github_url_base: e.g. "https://github.com/owner/repo/blob/master"
+    roslyn_data: per-file Roslyn analysis dict with "symbols" and "typeRefs" keys.
     """
     try:
-        source = path.read_bytes()
-        lines = source.decode("utf-8", errors="replace").splitlines()
+        raw = path.read_bytes()
+        source_text = raw.decode("utf-8", errors="replace")
+        lines = source_text.splitlines()
     except Exception:
         return []
     if not lines:
@@ -243,6 +271,35 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
         h = f"# {repo_name}/{rel} (lines {s}-{e})\n# {tokens}"
         return h + f"\n# {extra}" if extra else h
 
+    # Razor/Blazor: extract @code blocks as csharp + whole file as razor context
+    if ext in (".razor", ".cshtml"):
+        chunks = []
+        blocks = _extract_razor_cs_blocks(source_text)
+        for block in blocks:
+            s, e = block["start_line"], block["end_line"]
+            body = "\n".join(lines[s - 1:e]).strip()
+            if body:
+                url = f"{github_url_base}/{rel}#L{s}-L{e}" if github_url_base else ""
+                tokens = _path_tokens(repo_name, rel)
+                chunks.append({
+                    "repo": repo_name, "file": rel, "language": "csharp",
+                    "start_line": s, "end_line": e,
+                    "text": f"{_header(rel, s, e, tokens)}\n\n{body}",
+                    "github_url": url,
+                })
+        # Always include a full-file razor chunk for markup context
+        body = "\n".join(lines).strip()
+        if body:
+            url = f"{github_url_base}/{rel}#L1-L{len(lines)}" if github_url_base else ""
+            tokens = _path_tokens(repo_name, rel)
+            chunks.append({
+                "repo": repo_name, "file": rel, "language": language,
+                "start_line": 1, "end_line": len(lines),
+                "text": f"{_header(rel, 1, len(lines), tokens)}\n\n{body}",
+                "github_url": url,
+            })
+        return chunks
+
     # Small files: keep as single chunk to avoid diluting path/filename signal
     if len(lines) <= MAX_CHUNK_LINES:
         body = "\n".join(lines).strip()
@@ -257,10 +314,36 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
             }]
         return []
 
+    # Roslyn semantic chunking for .cs (preferred over tree-sitter when available)
+    if roslyn_data and ext == ".cs":
+        top_level_kinds = {"class", "interface", "struct", "enum", "record"}
+        all_syms = roslyn_data.get("symbols", [])
+        syms = [s for s in all_syms if s.get("kind") in top_level_kinds] or all_syms
+        if syms:
+            chunks = []
+            for sym in syms:
+                s = sym["startLine"] - 1  # 0-indexed
+                e = sym["endLine"]
+                if e - s > MAX_CHUNK_LINES:
+                    chunks.extend(_sliding_window(lines, s, e, repo_name, rel, language, github_url_base, extra))
+                else:
+                    body = "\n".join(lines[s:e]).strip()
+                    if body:
+                        url = f"{github_url_base}/{rel}#L{s+1}-L{e}" if github_url_base else ""
+                        tokens = _path_tokens(repo_name, rel)
+                        chunks.append({
+                            "repo": repo_name, "file": rel, "language": language,
+                            "start_line": s + 1, "end_line": e,
+                            "text": f"{_header(rel, s+1, e, tokens)}\n\n{body}",
+                            "github_url": url,
+                        })
+            if chunks:
+                return chunks
+
     if _TS_AVAILABLE and ext in _TS_LANGUAGES:
         try:
             parser = _TSParser(_TS_LANGUAGES[ext])
-            tree = parser.parse(source)
+            tree = parser.parse(raw)
             nodes = _collect_semantic_nodes(tree.root_node, _TS_SEMANTIC[ext])
             nodes = [n for n in nodes if n.type != "lexical_declaration" or _has_function_value(n)]
             if nodes:

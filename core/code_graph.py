@@ -17,6 +17,7 @@ _IMPORT_RE: dict = {
     "js": re.compile(r'''(?:import|from|require)\s*\(?['"](\.[^'"]+|\$lib/[^'"]+)['"]'''),
     "ts": re.compile(r'''(?:import|from|require)\s*\(?['"](\.[^'"]+|\$lib/[^'"]+)['"]'''),
     "kt": re.compile(r'^import\s+([\w.]+)', re.MULTILINE),
+    "cs": re.compile(r'^using\s+(?!static\b)(?:\w+\s*=\s*)?(\w+(?:\.\w+)+)\s*;', re.MULTILINE),
 }
 
 _NAMED_IMPORT_RE = re.compile(
@@ -31,6 +32,7 @@ _TOP_LEVEL_DEF_RE: dict = {
     "py": re.compile(r'^(?:class|def)\s+(\w+)', re.MULTILINE),
     "ts": re.compile(r'(?:export\s+)?(?:class|function|const|interface|type)\s+(\w+)'),
     "kt": re.compile(r'(?:class|fun|object)\s+(\w+)'),
+    "cs": re.compile(r'(?m)(?:class|interface|struct|enum|record)\s+(\w+)'),
 }
 
 _INHERIT_RE: dict = {
@@ -42,12 +44,17 @@ _INHERIT_RE: dict = {
         r'(?:class|interface|object)\s+\w+[^:{]*:\s*([\w,\s()]+?)(?:\{|$)',
         re.MULTILINE,
     ),
+    "cs": re.compile(
+        r'(?:class|struct|record)\s+\w+(?:<[^>]*>)?\s*:\s*([\w,\s<>.?[\]]+?)(?=\s*(?:where|\{))',
+        re.MULTILINE,
+    ),
 }
 
 _LANG_KEY: dict = {
     ".py": "py", ".js": "js", ".jsx": "js",
     ".ts": "ts", ".tsx": "ts", ".svelte": "js",
     ".kt": "kt", ".kts": "kt",
+    ".cs": "cs", ".razor": "cs", ".cshtml": "cs",
 }
 
 _EDGE_PRIORITY: dict = {"import": 0, "call": 1, "inherits": 2}
@@ -62,6 +69,12 @@ _PY_SKIP_BASES = frozenset({
     "list", "dict", "set", "tuple", "Enum", "IntEnum",
 })
 _TS_SKIP_BASES = frozenset({"Error", "EventEmitter", "Component", "React"})
+_CS_SKIP_BASES = frozenset({
+    "object", "Object", "Exception", "SystemException", "ApplicationException",
+    "Attribute", "Controller", "ControllerBase", "ApiController", "PageModel",
+    "BackgroundService", "IHostedService", "IDisposable", "ValueType",
+    "IEnumerable", "IList", "ICollection", "IQueryable", "IComparable",
+})
 
 
 def _extract_imports(path: Path, ext: str) -> list:
@@ -217,6 +230,14 @@ def _extract_inheritance_targets(
                     t = symbol_to_file.get(base)
                     if t and t != rel:
                         targets.add(t)
+    elif key == "cs":
+        for m in _INHERIT_RE["cs"].finditer(src):
+            for base in m.group(1).split(","):
+                base = base.strip().split("<")[0].strip()
+                if base and base not in _CS_SKIP_BASES:
+                    t = symbol_to_file.get(base)
+                    if t and t != rel:
+                        targets.add(t)
 
     return list(targets)
 
@@ -228,6 +249,25 @@ def _add_edge(G, src: str, dst: str, edge_type: str) -> None:
             G[src][dst]["type"] = edge_type
     else:
         G.add_edge(src, dst, type=edge_type)
+
+
+def inject_roslyn_edges(G, roslyn_data: dict, all_files: set) -> None:
+    """Add cross-file type reference edges from Roslyn analysis output."""
+    if not _NX_AVAILABLE or G is None or not roslyn_data:
+        return
+    symbol_to_file: dict = {}
+    for rel, data in roslyn_data.items():
+        for sym in data.get("symbols", []):
+            name = sym.get("name", "")
+            if name and name not in symbol_to_file:
+                symbol_to_file[name] = rel
+    for rel, data in roslyn_data.items():
+        if rel not in all_files or not G.has_node(rel):
+            continue
+        for type_ref in data.get("typeRefs", []):
+            target = symbol_to_file.get(type_ref)
+            if target and target != rel and target in all_files and G.has_node(target):
+                _add_edge(G, rel, target, "import")
 
 
 def build_code_graph(repo_path: Path, all_files: set):

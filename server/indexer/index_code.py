@@ -14,6 +14,7 @@ from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelecto
 
 from chunker import chunk_file, CODE_EXTS, SKIP_DIRS, REPOS_DIR, _is_excluded
 from cache import load_cache, save_cache
+import roslyn_analyzer
 
 OLLAMA_URL       = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 QDRANT_URL   = os.environ.get("QDRANT_URL", "http://qdrant:6333")
@@ -204,12 +205,19 @@ def main():
         total = 0
         file_point_ids: dict = {}
 
+        roslyn_data: dict = {}
+        if roslyn_analyzer.is_available() and any(p.suffix == ".cs" for p in code_files):
+            print(f"  {name}: running Roslyn analyzer...", flush=True)
+            roslyn_data = roslyn_analyzer.analyze_dir(repo_path)
+
         for i, path in enumerate(code_files):
             if i % 10 == 0 and i > 0:
                 print(f"  {name}: {i}/{len(code_files)} files, {total} chunks so far...", flush=True)
 
+            rel_path = str(path.relative_to(repo_path)).replace("\\", "/")
+
             if not incremental:
-                cache_key = f"{name}/{str(path.relative_to(repo_path))}"
+                cache_key = f"{name}/{rel_path}"
                 mtime = path.stat().st_mtime
                 entry = file_cache.get(cache_key, {})
                 if entry.get("mtime") == mtime:
@@ -222,7 +230,7 @@ def main():
                     continue
 
             points = []
-            for chunk in chunk_file(path, name, base_dir=repo_path):
+            for chunk in chunk_file(path, name, base_dir=repo_path, roslyn_data=roslyn_data.get(rel_path)):
                 cid = int(hashlib.md5(
                     f"{chunk['repo']}:{chunk['file']}:{chunk['start_line']}".encode()
                 ).hexdigest()[:8], 16)
@@ -260,6 +268,9 @@ def main():
         try:
             import graph as _graph
             G = _graph.build_code_graph(repo_path, all_code_file_paths)
+            if roslyn_data:
+                from code_graph import inject_roslyn_edges
+                inject_roslyn_edges(G, roslyn_data, all_code_file_paths)
             if G is not None:
                 metadata = _graph.compute_code_metadata(G)
                 _graph.persist_code_graph(G, metadata, name, DATA_DIR)
