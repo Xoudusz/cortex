@@ -2,8 +2,9 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0-slim AS roslyn-builder
 WORKDIR /build
 COPY core/roslyn_tool/ .
-RUN dotnet publish -c Release -r linux-x64 --self-contained true \
-    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o /out
+RUN dotnet publish CortexAnalyzer.csproj -c Release -r linux-x64 \
+    -p:SelfContained=true -p:PublishSingleFile=true \
+    -p:IncludeNativeLibrariesForSelfExtract=true -o /out
 
 # Stage 2: Python app
 FROM python:3.12-slim
