@@ -103,6 +103,28 @@ docker compose pull cortex-mcp && docker compose up -d cortex-mcp
 
 ---
 
+## Supported languages
+
+| Language | Extensions | Chunking |
+|----------|-----------|---------|
+| Python | `.py` | Semantic (tree-sitter) |
+| JavaScript | `.js`, `.jsx` | Semantic (tree-sitter) |
+| TypeScript | `.ts`, `.tsx` | Semantic (tree-sitter) |
+| Kotlin | `.kt`, `.kts` | Semantic (tree-sitter) |
+| C# | `.cs` | Semantic (tree-sitter) |
+| Svelte | `.svelte` | Sliding window |
+| Java | `.java` | Sliding window |
+| Go | `.go` | Sliding window |
+| Rust | `.rs` | Sliding window |
+| GDScript | `.gd` | Sliding window |
+| CSS | `.css` | Sliding window |
+| HTML | `.html` | Sliding window |
+| YAML | `.yml`, `.yaml` | Sliding window |
+
+Semantic chunking splits files by function/class/method boundaries. Sliding window uses fixed-size overlapping chunks as a fallback for unsupported languages.
+
+---
+
 ## Graph layer
 
 Graph-augmented RAG builds structural graphs at index time, then uses them to boost retrieval.

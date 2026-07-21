@@ -3,3 +3,4 @@ tree-sitter-python
 tree-sitter-javascript
 tree-sitter-typescript
 tree-sitter-kotlin
+tree-sitter-c-sharp

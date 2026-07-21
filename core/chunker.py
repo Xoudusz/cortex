@@ -7,14 +7,14 @@ from pathlib import Path
 
 REPOS_DIR = Path(os.environ.get("REPOS_DIR", "/tmp/repos"))
 
-CODE_EXTS = {".js", ".ts", ".tsx", ".jsx", ".svelte", ".py", ".java", ".go", ".rs", ".css", ".html", ".kt", ".kts", ".gd", ".yml", ".yaml"}
-SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", ".svelte-kit", "__pycache__", ".gradle", "target"}
+CODE_EXTS = {".js", ".ts", ".tsx", ".jsx", ".svelte", ".py", ".java", ".go", ".rs", ".css", ".html", ".kt", ".kts", ".gd", ".yml", ".yaml", ".cs"}
+SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", ".svelte-kit", "__pycache__", ".gradle", "target", "bin", "obj"}
 LANG_MAP = {
     ".js": "javascript", ".ts": "typescript", ".tsx": "typescript",
     ".jsx": "javascript", ".svelte": "svelte", ".py": "python",
     ".java": "java", ".go": "go", ".rs": "rust", ".css": "css", ".html": "html",
     ".kt": "kotlin", ".kts": "kotlin", ".gd": "gdscript",
-    ".yml": "yaml", ".yaml": "yaml",
+    ".yml": "yaml", ".yaml": "yaml", ".cs": "csharp",
 }
 
 def _is_excluded(rel: str, patterns: list) -> bool:
@@ -97,6 +97,15 @@ _FRAMEWORK_IMPORTS = [
     ("use actix",              "actix"),
     ("use axum",               "axum"),
     ("use tokio",              "tokio"),
+    # C#
+    ("using Microsoft.AspNetCore",       "aspnetcore"),
+    ("using Microsoft.Extensions",       "aspnetcore"),
+    ("using Microsoft.EntityFrameworkCore", "entityframework"),
+    ("using Newtonsoft.Json",            "newtonsoft"),
+    ("using System.Text.Json",           "system-text-json"),
+    ("using Xunit",                      "xunit"),
+    ("using NUnit.Framework",            "nunit"),
+    ("using Microsoft.Azure",            "azure-sdk"),
 ]
 
 try:
@@ -124,6 +133,15 @@ try:
         ".kt":  {"function_declaration", "class_declaration", "object_declaration"},
         ".kts": {"function_declaration", "class_declaration", "object_declaration"},
     }
+    try:
+        import tree_sitter_c_sharp as _tscs
+        _TS_LANGUAGES[".cs"] = Language(_tscs.language())
+        _TS_SEMANTIC[".cs"] = {
+            "method_declaration", "class_declaration", "interface_declaration",
+            "constructor_declaration", "struct_declaration", "enum_declaration",
+        }
+    except Exception:
+        pass
     _TS_AVAILABLE = True
 except Exception:
     _TS_AVAILABLE = False
