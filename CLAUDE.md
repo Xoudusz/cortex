@@ -40,12 +40,14 @@ Auth: built-in OAuth 2.0 (Bearer token). Login at `/oauth/authorize` with `ADMIN
 
 ```
 core/                   # ONE shared lib — symlinked into local/cortex/core/
-  chunker.py            # tree-sitter chunking + sliding-window + _is_excluded()
+  chunker.py            # tree-sitter + Roslyn chunking + Razor @code extraction + sliding-window
   cache.py              # load_cache / save_cache — {mtime, hash} format, backward-compat
   graph.py              # facade — re-exports from code_graph, notes_graph, global_graph
-  code_graph.py         # import/call/inheritance edges, centrality, Louvain
+  code_graph.py         # import/call/inheritance edges, centrality, Louvain + inject_roslyn_edges()
   notes_graph.py        # Obsidian wikilink graph + PPR augmentation
   global_graph.py       # cross-repo edges from root config files
+  roslyn_analyzer.py    # subprocess wrapper for CortexAnalyzer binary
+  roslyn_tool/          # .NET 8 console app — CSharpSyntaxTree.ParseText, no MSBuild needed
 server/
   mcp/                  # SSE server (Docker, deployed to cortex.hyvitech.org)
     server.py           # startup only — threads, routes, middleware wiring, uvicorn
@@ -62,7 +64,7 @@ server/
     template.py         # embedded HTML/CSS/JS dashboard + LOGO_SVG
     oauth.py            # custom OAuth 2.0 AS (RFC 8414/7591/7636, PKCE S256)
     requirements.txt
-    Dockerfile          # build context is repo root
+    Dockerfile          # multi-stage: dotnet/sdk:8.0-bookworm-slim builds CortexAnalyzer → python:3.12-slim
   indexer/              # code/notes indexers for server mode
     index.py            # notes indexer — heading-chunked, tags, modified_at
     index_code.py       # code indexer — clone/pull, embed, upsert
