@@ -1,5 +1,5 @@
 # Stage 1: Build Roslyn C# analyzer (self-contained single-file binary)
-FROM mcr.microsoft.com/dotnet/sdk:8.0-slim AS roslyn-builder
+FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS roslyn-builder
 WORKDIR /build
 COPY core/roslyn_tool/ .
 RUN dotnet publish CortexAnalyzer.csproj -c Release -r linux-x64 \
