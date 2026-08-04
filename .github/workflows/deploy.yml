@@ -36,6 +36,11 @@ jobs:
           pip install -q -e local/
           python local/tests/test_imports.py
 
+      - name: Test chunker + indexer edge cases
+        run: |
+          python tests/test_chunker.py
+          python tests/test_indexer.py
+
       - name: Read version
         id: ver
         run: |
