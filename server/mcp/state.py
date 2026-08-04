@@ -45,10 +45,12 @@ def _default_stats() -> dict:
         "centrality_lift_total": 0.0,
         "centrality_lift_count": 0,
         "search_notes_calls": 0,
+        "search_all_calls": 0,
         "ppr_fires": 0,
         "ppr_results_added": 0,
         "graph_cache_hits": 0,
         "graph_cache_misses": 0,
+        "graph_cache_cold_loads": 0,
         "reindex_count": 0,
         "embed_cache_notes": 0,
         "embed_cache_code": 0,
@@ -128,7 +130,7 @@ def _get_code_graph_meta(repo_name: str) -> dict:
         data = json.loads(path.read_text())
         meta = {n["id"]: n for n in data.get("nodes", []) if "id" in n}
         _graph_cache[cache_key] = meta
-        _stats["graph_cache_misses"] += 1
+        _stats["graph_cache_cold_loads"] += 1
         return meta
     except Exception:
         _stats["graph_cache_misses"] += 1

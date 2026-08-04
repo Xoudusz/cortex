@@ -7,7 +7,7 @@ from qdrant_client import QdrantClient
 
 from config import QDRANT_URL, VERSION, collection_name
 from state import _stats, _get_code_graph_meta, _load_all_stats, get_active_workspace, set_active_workspace, _workspace_data_dir
-from onboarding import PROJECT_CLAUDE_MD_TEMPLATE, CORTEX_MERGE_SECTION, _merge_onboarding
+from onboarding import PROJECT_CLAUDE_MD_TEMPLATE, _merge_onboarding, _build_cortex_section
 from reindex import _enqueue, get_status, clear_cache as _clear_cache
 from repos import _load_repos
 from formatters import fmt_stats
@@ -58,8 +58,16 @@ def register_admin(mcp) -> None:
         s = get_status()
         q = s.get("queue_depth", 0)
         if s["started_at"] is None:
-            idle = "No reindex has been run yet."
-            return idle + (f" {q} jobs queued." if q else "")
+            msg = "No reindex has been run yet." + (f" {q} jobs queued." if q else "")
+            if monitor and q > 0:
+                msg += (
+                    "\n\nMONITOR INSTRUCTION: Call ScheduleWakeup immediately with:\n"
+                    "- delaySeconds: 60\n"
+                    "- prompt: \"Call the cortex reindex_status MCP tool with monitor=True. "
+                    "If still running (running=True or queue_depth>0), the tool will instruct you to reschedule. "
+                    "If done, call PushNotification with a one-line summary and stop.\""
+                )
+            return msg
         elapsed = time.time() - s["started_at"]
         status = "running" if s["running"] else "done"
         header = f"Status: {status} ({elapsed:.0f}s elapsed)"
@@ -230,18 +238,22 @@ def register_admin(mcp) -> None:
         return "\n".join(lines)
 
     @mcp.tool()
-    def get_onboarding(existing_content: str = "") -> str:
+    def get_onboarding(existing_content: str = "", force: bool = False) -> str:
         """Get a project CLAUDE.md template, or merge Cortex section into existing content.
 
         No args: returns full PROJECT_CLAUDE_MD_TEMPLATE with placeholder sections
         (Stack, Commands, Structure, Conventions, Don't) that Claude should fill in
-        by examining the actual codebase. Cortex and Preferences sections are pre-filled.
+        by examining the actual codebase. Cortex and Preferences sections are pre-filled
+        with the current indexed repo list.
 
         With existing_content: appends Cortex + Preferences sections if not already present.
+        Set force=True to replace an existing stale Cortex section with the current repo list.
         """
+        repos = _load_repos()
+        repo_names = [r.split("/")[-1] for r in repos]
         if existing_content.strip():
-            return _merge_onboarding(existing_content)
-        return PROJECT_CLAUDE_MD_TEMPLATE
+            return _merge_onboarding(existing_content, force=force, repo_names=repo_names)
+        return PROJECT_CLAUDE_MD_TEMPLATE.replace("__CORTEX_SECTION__", _build_cortex_section(repo_names))
 
     @mcp.prompt()
     def onboarding() -> str:

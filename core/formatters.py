@@ -53,13 +53,14 @@ def format_code_results(deduped) -> str:
 
 def fmt_stats(v: str, stats: dict, current: bool = False) -> str:
     """Format stats block for one version. Safe for both server and local stats dicts."""
-    total_searches = stats.get("search_code_calls", 0) + stats.get("search_notes_calls", 0)
+    total_searches = stats.get("search_code_calls", 0) + stats.get("search_notes_calls", 0) + stats.get("search_all_calls", 0)
     ppr_rate = (
         f"{stats['ppr_fires'] / stats['search_notes_calls'] * 100:.1f}%"
         if stats.get("search_notes_calls", 0) > 0 else "—"
     )
     avg_ppr = round(stats["ppr_results_added"] / stats["ppr_fires"], 1) if stats.get("ppr_fires", 0) > 0 else "—"
-    total_cache = stats.get("graph_cache_hits", 0) + stats.get("graph_cache_misses", 0)
+    cold_loads = stats.get("graph_cache_cold_loads", 0)
+    total_cache = stats.get("graph_cache_hits", 0) + stats.get("graph_cache_misses", 0) + cold_loads
     cache_rate = f"{stats['graph_cache_hits'] / total_cache * 100:.1f}%" if total_cache > 0 else "—"
     avg_lift = round(stats["centrality_lift_total"] / stats["centrality_lift_count"], 4) if stats.get("centrality_lift_count", 0) > 0 else 0
     total_results = stats.get("total_results_code", 0) + stats.get("total_results_notes", 0)
@@ -86,7 +87,7 @@ def fmt_stats(v: str, stats: dict, current: bool = False) -> str:
         lines.append(f"  period: {period}")
 
     lines += [
-        f"  searches: code={stats.get('search_code_calls', 0)} notes={stats.get('search_notes_calls', 0)}  total={total_searches}  (notes {notes_pct})",
+        f"  searches: code={stats.get('search_code_calls', 0)} notes={stats.get('search_notes_calls', 0)} all={stats.get('search_all_calls', 0)}  total={total_searches}  (notes {notes_pct})",
         f"  results: code={stats.get('total_results_code', 0)} notes={stats.get('total_results_notes', 0)}  avg/search={avg_results}",
         f"  centrality lift avg: {avg_lift} (across {stats.get('centrality_lift_count', 0)} results)",
         f"  PPR: {stats.get('ppr_fires', 0)} fires ({ppr_rate} of note searches) · +{stats.get('ppr_results_added', 0)} results · avg {avg_ppr}/fire",
@@ -107,7 +108,7 @@ def fmt_stats(v: str, stats: dict, current: bool = False) -> str:
 
     lines += [
         f"  context injected: notes={_k(ctx_notes)} code={_k(ctx_code)}  total={_k(ctx_total)} tokens (~chars/4 est.)",
-        f"  graph cache: {cache_rate} ({stats.get('graph_cache_hits', 0)}/{total_cache})",
+        f"  graph cache: {cache_rate} ({stats.get('graph_cache_hits', 0)}/{total_cache})  cold={cold_loads}",
         f"  embed cache skipped: notes={stats.get('embed_cache_notes', 0)} code={stats.get('embed_cache_code', 0)}",
         f"  reindexes: {stats.get('reindex_count', 0)}",
     ]

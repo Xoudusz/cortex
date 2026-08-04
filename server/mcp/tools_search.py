@@ -195,8 +195,7 @@ def register_search(mcp) -> None:
         Use when unsure whether the answer is in notes or code,
         or when you want a combined view across both collections.
         """
-        _stats["search_notes_calls"] += 1
-        _stats["search_code_calls"] += 1
+        _stats["search_all_calls"] += 1
         notes_out, matched_files, matched_scores = _search_notes(query, limit)
         code_out, log_entries = _search_code(query, limit)
         _log_search("search_all", query, log_entries)
