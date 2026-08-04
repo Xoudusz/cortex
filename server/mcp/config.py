@@ -31,7 +31,7 @@ VERSION        = (Path("/app/VERSION").read_text().strip()
                   if Path("/app/VERSION").exists() else "dev")
 STATS_FILE     = DATA_DIR / "stats.json"
 WORKSPACE      = os.environ.get("CORTEX_WORKSPACE", "default")
-PPR_THRESHOLD  = float(os.environ.get("PPR_THRESHOLD", "0.03"))
+PPR_THRESHOLD  = float(os.environ.get("PPR_THRESHOLD") or "0.03")
 ALLOWED_HOSTS  = [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()]
 
 

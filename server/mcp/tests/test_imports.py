@@ -57,6 +57,7 @@ def test_config_import():
     assert hasattr(config, "HOST")
     assert hasattr(config, "PORT")
     assert hasattr(config, "ALLOWED_HOSTS")
+    assert isinstance(config.PPR_THRESHOLD, float), "PPR_THRESHOLD must be float (empty string breaks float())"
 
 
 def test_tools_import():
