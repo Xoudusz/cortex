@@ -24,6 +24,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate Python imports
+        run: |
+          pip install -q -r server/mcp/requirements.txt
+          python -c "from mcp.server.mcpserver import MCPServer; print('MCP import OK')"
+
       - name: Read version
         id: ver
         run: |
