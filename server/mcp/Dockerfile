@@ -18,7 +18,8 @@ RUN pip install --no-cache-dir -r requirements-ts.txt
 # Fast installs, changes more often
 COPY server/mcp/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
-    python3 -c "from fastembed import SparseTextEmbedding; SparseTextEmbedding('Qdrant/bm25')" || true
+    python3 -c "from fastembed import SparseTextEmbedding; SparseTextEmbedding('Qdrant/bm25')" || true && \
+    python3 -c "from mcp.server.mcpserver import MCPServer; from mcp.server.transport_security import TransportSecuritySettings; print('MCP SDK OK')"
 
 COPY VERSION /app/VERSION
 COPY server/mcp/server.py server/mcp/web_ui.py server/mcp/oauth.py server/mcp/config.py server/mcp/reindex.py server/mcp/tools.py \

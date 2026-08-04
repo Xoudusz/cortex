@@ -1,11 +1,21 @@
-"""Smoke tests — validate server imports and critical instantiations before Docker build."""
+"""Smoke tests — validate server imports and critical instantiations before Docker build.
+
+Run via CI: PYTHONPATH=server/mcp:core python server/mcp/tests/test_imports.py
+Run in Docker: python /app/tests/test_imports.py  (PYTHONPATH not needed — all files in /app)
+"""
 
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Support both CI (PYTHONPATH set externally) and direct runs from this dir
+_here = os.path.dirname(os.path.abspath(__file__))
+_server_mcp = os.path.join(_here, "..")
+_core = os.path.join(_here, "..", "..", "..", "core")
+for _p in (_server_mcp, _core):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
-# Set required env vars so config.py doesn't blow up
+# Stub env vars so config.py imports without network calls
 os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
 os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
 os.environ.setdefault("BASE_URL", "http://localhost:8765")

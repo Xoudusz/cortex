@@ -25,6 +25,8 @@ jobs:
           fetch-depth: 0
 
       - name: Test server imports
+        env:
+          PYTHONPATH: server/mcp:core
         run: |
           pip install -q -r server/mcp/requirements.txt
           python server/mcp/tests/test_imports.py
