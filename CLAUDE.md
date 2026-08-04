@@ -4,7 +4,7 @@ Personal RAG stack — Obsidian notes + source code indexed into Qdrant, exposed
 
 ## Stack
 
-- Python 3.12 + FastMCP (MCP Python SDK)
+- Python 3.12 + MCP SDK v2 (MCPServer from `mcp.server.mcpserver`)
 - Qdrant (vector store) + Ollama (nomic-embed-text embeddings)
 - watchdog for auto-reindex on notes change
 - Docker Compose — deployed on portainer LXC (192.168.68.103)
