@@ -48,9 +48,9 @@ def pull_models() -> None:
 def stats() -> None:
     """Show cortex efficiency stats."""
     from .state import _stats
-    from .mcp_server import _fmt_stats
+    from .core.formatters import fmt_stats
     from .config import VERSION
-    click.echo(_fmt_stats(VERSION, _stats, current=True))
+    click.echo(fmt_stats(VERSION, _stats, current=True))
 
 
 @cli.group()

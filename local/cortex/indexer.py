@@ -1,6 +1,7 @@
 """Index notes and code from a local path into embedded Qdrant."""
 
 import hashlib
+import os
 import re
 from pathlib import Path
 
@@ -20,11 +21,33 @@ from .core import graph as _graph
 from .core import roslyn_analyzer as _roslyn
 
 
+def _walk_code_files(root: Path, exclude_patterns: list) -> list[Path]:
+    """Walk root pruning SKIP_DIRS at directory level — avoids descending into bin/obj/node_modules."""
+    found = []
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for fname in files:
+            p = Path(dirpath) / fname
+            if p.suffix in CODE_EXTS:
+                rel = str(p.relative_to(root)).replace("\\", "/")
+                if not _is_excluded(rel, exclude_patterns):
+                    found.append(p)
+    return found
+
+
 def _qdrant() -> QdrantClient:
     migrate_legacy()
     d = data_dir()
     d.mkdir(parents=True, exist_ok=True)
-    return QdrantClient(path=qdrant_path())
+    try:
+        return QdrantClient(path=qdrant_path())
+    except Exception as e:
+        if "already" in str(e).lower() or "lock" in str(e).lower():
+            raise SystemExit(
+                "Error: Qdrant database is locked by another process (cortex serve is running).\n"
+                "Stop cortex serve first, or use the reindex() MCP tool from Claude Code instead."
+            ) from e
+        raise
 
 
 def _ensure_collection(client: QdrantClient, name: str) -> bool:
@@ -185,12 +208,7 @@ def index_code(code_dir: Path, show_progress: bool = False) -> int:
     _ensure_collection(client, "code")
     use_sparse = _sparse_available()
 
-    code_files = [
-        p for p in code_dir.rglob("*")
-        if p.is_file() and p.suffix in CODE_EXTS
-        and not any(s in p.parts for s in SKIP_DIRS)
-        and not _is_excluded(str(p.relative_to(code_dir)), exclude_patterns)
-    ]
+    code_files = _walk_code_files(code_dir, exclude_patterns)
 
     cache = load_cache("code", cache_file())
     if client.get_collection("code").points_count == 0:
@@ -268,10 +286,11 @@ def index_path(path: Path, show_progress: bool = False) -> None:
     path = path.resolve()
     data_dir().mkdir(parents=True, exist_ok=True)
 
-    md_files = list(path.rglob("*.md"))
-    code_files = [p for p in path.rglob("*")
-                  if p.is_file() and p.suffix in CODE_EXTS
-                  and not any(s in p.parts for s in SKIP_DIRS)]
+    md_files = []
+    for dirpath, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        md_files.extend(Path(dirpath) / f for f in files if f.endswith(".md"))
+    code_files = _walk_code_files(path, [])
 
     if md_files:
         print(f"\nIndexing notes from {path} ({len(md_files)} .md files)...")
