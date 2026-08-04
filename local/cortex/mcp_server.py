@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from qdrant_client import QdrantClient
 from qdrant_client.models import Prefetch, Fusion, SparseVector
 
@@ -20,7 +20,7 @@ from .state import _stats, get_graph_meta, save_stats, invalidate_graph_cache
 from .indexer import index_path
 from .core.formatters import format_notes_parts, format_code_results, fmt_stats
 
-mcp = FastMCP("cortex")
+mcp = MCPServer("cortex")
 
 
 def _log_search(tool: str, query: str, top: list) -> None:
