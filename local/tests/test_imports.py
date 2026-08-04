@@ -39,6 +39,42 @@ def test_cli_module():
     assert cli is not None
 
 
+def test_config_data_dir():
+    from cortex.config import data_dir, WORKSPACES_DIR
+    d = data_dir()
+    assert str(WORKSPACES_DIR) in str(d)
+
+
+def test_walk_code_files_skips_dirs():
+    import os, tempfile
+    from pathlib import Path
+    from cortex.indexer import _walk_code_files
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "node_modules").mkdir()
+        (root / "node_modules" / "lib.js").write_text("x")
+        (root / "src").mkdir()
+        (root / "src" / "main.py").write_text("x")
+        found = _walk_code_files(root, [])
+        paths = [str(p) for p in found]
+        assert any("main.py" in p for p in paths)
+        assert not any("node_modules" in p for p in paths)
+
+
+def test_is_excluded_patterns():
+    from cortex.core.chunker import _is_excluded
+    assert _is_excluded("tmp/foo.log", ["tmp/*"])
+    assert not _is_excluded("src/main.py", ["tmp/*"])
+    assert _is_excluded("dist/bundle.js", ["dist/*"])
+
+
+def test_fmt_stats_returns_string():
+    from cortex.core.formatters import fmt_stats
+    result = fmt_stats("2.3.8", {}, current=True)
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
 if __name__ == "__main__":
     import traceback
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]

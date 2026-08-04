@@ -1,6 +1,8 @@
 """Cortex local MCP server — stdio transport, all 8 tools, embedded Qdrant."""
 
 import json
+import logging
+import logging.handlers
 import threading
 import time
 from pathlib import Path
@@ -413,8 +415,33 @@ def list_workspaces() -> str:
     return "\n".join(lines)
 
 
+@mcp.tool()
+def get_log(lines: int = 100) -> str:
+    """Return path and tail of the cortex log file. Share output with developer for troubleshooting."""
+    log_path = data_dir() / "cortex.log"
+    if not log_path.exists():
+        return f"No log yet. Will be created at: {log_path}"
+    try:
+        all_lines = log_path.read_text(errors="replace").splitlines()
+        tail = "\n".join(all_lines[-lines:])
+        return f"Log: {log_path}\n\n{tail}"
+    except Exception as e:
+        return f"Error reading log: {e}\nPath: {log_path}"
+
+
 def run() -> None:
     """Entry point for stdio MCP server."""
+    log_path = data_dir() / "cortex.log"
+    data_dir().mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=[logging.handlers.RotatingFileHandler(
+            log_path, maxBytes=5 * 1024 * 1024, backupCount=3,
+        )],
+        force=True,
+    )
     cfg = get_config()
     if cfg["watch"]["enabled"]:
         last = cfg["index"].get("last_path", "")

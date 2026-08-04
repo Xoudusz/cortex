@@ -65,6 +65,32 @@ def test_tools_import():
     assert mcp is not None
 
 
+def test_config_allowed_hosts_empty():
+    import importlib, os
+    os.environ.pop("ALLOWED_HOSTS", None)
+    import config as cfg
+    importlib.reload(cfg)
+    assert cfg.ALLOWED_HOSTS == []
+
+
+def test_config_allowed_hosts_csv():
+    import importlib, os
+    os.environ["ALLOWED_HOSTS"] = "a.com, b.com"
+    import config as cfg
+    importlib.reload(cfg)
+    assert cfg.ALLOWED_HOSTS == ["a.com", "b.com"]
+    os.environ.pop("ALLOWED_HOSTS", None)
+
+
+def test_ppr_threshold_empty_string():
+    import importlib, os
+    os.environ["PPR_THRESHOLD"] = ""
+    import config as cfg
+    importlib.reload(cfg)
+    assert isinstance(cfg.PPR_THRESHOLD, float)
+    os.environ.pop("PPR_THRESHOLD", None)
+
+
 if __name__ == "__main__":
     import traceback
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
