@@ -93,7 +93,7 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 - `reindex_status()` — check progress of last reindex
 - `clear_cache(all_workspaces?)` — delete embed cache for current workspace (or all); not auto-approved
 - `get_stats(all?)` — efficiency metrics; `all=True` shows all persisted versions side-by-side
-- `get_onboarding(existing_content?)` — returns setup instructions + preferences; pass existing CLAUDE.md content to merge
+- `get_onboarding(existing_content?, force?)` — returns setup instructions + preferences; pass existing CLAUDE.md content to merge; `force=True` replaces stale Cortex section
 - `switch_workspace(name)` — switch active workspace (isolated Qdrant collections + repos)
 - `list_workspaces()` — list all workspaces and their index status
 
