@@ -24,10 +24,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate Python imports
+      - name: Test server imports
         run: |
           pip install -q -r server/mcp/requirements.txt
-          python -c "from mcp.server.mcpserver import MCPServer; print('MCP import OK')"
+          python server/mcp/tests/test_imports.py
+
+      - name: Test local package imports
+        run: |
+          pip install -q -e local/
+          python local/tests/test_imports.py
 
       - name: Read version
         id: ver

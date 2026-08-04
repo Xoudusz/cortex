@@ -6,10 +6,11 @@ import logging.handlers
 import threading
 
 import uvicorn
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.routing import Mount, Route
 
-from config import DATA_DIR, HOST, PORT, VERSION, warmup
+from config import DATA_DIR, HOST, PORT, VERSION, warmup, ALLOWED_HOSTS
 from state import _stats_saver
 from reindex import _reindex_worker
 from middleware import _BearerTokenMiddleware, _NormalizeSSEPath
@@ -52,7 +53,11 @@ if __name__ == "__main__":
     threading.Thread(target=_start_watcher, daemon=True).start()
     threading.Thread(target=_stats_saver, daemon=True).start()
     threading.Thread(target=_reindex_worker, daemon=True).start()
-    sse_app = mcp.sse_app()
+    _transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=bool(ALLOWED_HOSTS),
+        allowed_hosts=ALLOWED_HOSTS,
+    )
+    sse_app = mcp.sse_app(transport_security=_transport_security)
     starlette_app = Starlette(routes=[
         Route("/health", health, methods=["GET"]),
         Route("/favicon.svg", favicon, methods=["GET"]),

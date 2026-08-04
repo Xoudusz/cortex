@@ -32,6 +32,7 @@ VERSION        = (Path("/app/VERSION").read_text().strip()
 STATS_FILE     = DATA_DIR / "stats.json"
 WORKSPACE      = os.environ.get("CORTEX_WORKSPACE", "default")
 PPR_THRESHOLD  = float(os.environ.get("PPR_THRESHOLD", "0.03"))
+ALLOWED_HOSTS  = [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()]
 
 
 def collection_name(base: str, workspace: str = "") -> str:
