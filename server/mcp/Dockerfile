@@ -30,4 +30,9 @@ COPY server/indexer/index.py server/indexer/index_code.py ./
 COPY --from=roslyn-builder /out/CortexAnalyzer /app/roslyn_tool/CortexAnalyzer
 RUN chmod +x /app/roslyn_tool/CortexAnalyzer /app/index.py /app/index_code.py
 ENV ROSLYN_ANALYZER=/app/roslyn_tool/CortexAnalyzer
+
+ARG GIT_COMMIT=unknown
+LABEL org.opencontainers.image.revision=$GIT_COMMIT \
+      org.opencontainers.image.source="https://github.com/Xoudusz/cortex"
+
 CMD ["python", "server.py"]
