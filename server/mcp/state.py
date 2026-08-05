@@ -96,7 +96,10 @@ def _save_stats() -> None:
     try:
         existing: dict = {}
         if STATS_FILE.exists():
-            existing = json.loads(STATS_FILE.read_text()).get("versions", {})
+            try:
+                existing = json.loads(STATS_FILE.read_text()).get("versions", {})
+            except Exception:
+                log.warning("stats file corrupt, resetting")
         existing[VERSION] = {**_stats, "last_saved": datetime.now(timezone.utc).isoformat()}
         STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATS_FILE.write_text(json.dumps({"versions": existing}, indent=2))
