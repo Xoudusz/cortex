@@ -27,7 +27,7 @@ EXCLUDE_PATTERNS = [p for p in os.environ.get("EXCLUDE_PATTERNS", "").split(",")
 def embed(text: str) -> list:
     resp = httpx.post(
         f"{OLLAMA_URL}/api/embeddings",
-        json={"model": EMBED_MODEL, "prompt": text},
+        json={"model": EMBED_MODEL, "prompt": text[:6000]},  # nomic-embed-text: 2048 token physical batch limit
         timeout=30,
     )
     resp.raise_for_status()
