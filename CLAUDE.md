@@ -161,3 +161,7 @@ Push to main → CI builds new image. On LXC:
 ```bash
 docker compose pull cortex-mcp && docker compose up -d cortex-mcp
 ```
+
+## Issue workflow
+
+To auto-close a GitHub issue on merge, put `Closes #N` in the **PR body** (not commit message). Direct pushes to main do not trigger keyword auto-close. Always use a PR when a commit resolves an issue. Token lacks `issues: write` so manual close via UI is the fallback.
