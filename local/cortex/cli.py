@@ -11,11 +11,12 @@ import click
 
 from .config import (
     WORKSPACES_DIR, get_active_workspace, set_active_workspace, get_workspace_dir,
-    data_dir, save_last_indexed_path,
+    data_dir, save_last_indexed_path, qdrant_path, get_config, VERSION,
 )
 
 
 @click.group()
+@click.version_option(VERSION, prog_name="cortex")
 def cli() -> None:
     """cortex: local semantic search MCP server."""
 
@@ -160,25 +161,87 @@ def search_log_cmd(top: int) -> None:
             click.echo(f"  {q}")
 
 
+_SYSTEM_DIRS = {"/", "/usr", "/bin", "/etc", "/sbin", "/var", r"C:\Windows"}
+_SCOPE_CHOICES = click.Choice(["user", "local", "project"])
+
+
 @cli.command("install")
-def install_cmd() -> None:
+@click.option("--scope", default="user", type=_SCOPE_CHOICES, show_default=True,
+              help="MCP registration scope.")
+def install_cmd(scope: str) -> None:
     """Download embedding models and register cortex MCP in Claude Code."""
     from .embedder import pull_models as _pull
+    cwd = str(Path.cwd())
+    if scope != "user" and cwd in _SYSTEM_DIRS:
+        click.echo(f"Warning: cwd looks like a system directory ({cwd}). Use --scope user to register globally.")
     click.echo("Downloading embedding models...")
     _pull()
-    mcp_cmd = "claude mcp add cortex --transport stdio cortex serve"
+    mcp_cmd = f"claude mcp add --scope {scope} cortex --transport stdio cortex serve"
     claude = shutil.which("claude")
     if not claude:
         click.echo("Models ready. Register MCP manually (claude not found in PATH):")
         click.echo(f"  {mcp_cmd}")
         return
     click.echo("Registering MCP server in Claude Code...")
+    subprocess.run(
+        [claude, "mcp", "remove", "cortex", "--scope", scope],
+        capture_output=True, text=True,
+    )
     result = subprocess.run(
-        [claude, "mcp", "add", "cortex", "--transport", "stdio", "cortex", "serve"],
+        [claude, "mcp", "add", "--scope", scope, "cortex", "--transport", "stdio", "cortex", "serve"],
         capture_output=True, text=True,
     )
     if result.returncode == 0:
-        click.echo("Done. cortex is ready — restart Claude Code to activate.")
+        click.echo(f"Done. cortex is ready (scope: {scope}) — restart Claude Code to activate.")
     else:
         click.echo(f"MCP registration failed. Run manually:\n  {mcp_cmd}")
         click.echo(result.stderr.strip())
+
+
+@cli.command("uninstall")
+@click.option("--scope", default="user", type=_SCOPE_CHOICES, show_default=True,
+              help="MCP registration scope to remove from.")
+def uninstall_cmd(scope: str) -> None:
+    """Remove cortex MCP registration from Claude Code."""
+    claude = shutil.which("claude")
+    if not claude:
+        click.echo(f"claude not found in PATH. Remove manually:\n  claude mcp remove cortex --scope {scope}")
+        return
+    result = subprocess.run(
+        [claude, "mcp", "remove", "cortex", "--scope", scope],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        click.echo(f"cortex MCP removed (scope: {scope}).")
+    else:
+        click.echo(f"Removal failed (scope: {scope}).")
+        click.echo(result.stderr.strip())
+
+
+@cli.command("doctor")
+def doctor_cmd() -> None:
+    """Show cortex status: version, model cache, MCP registration, workspace, index."""
+    click.echo(f"version      {VERSION}")
+
+    cache_dir = Path.home() / ".cache" / "fastembed"
+    cache_ok = cache_dir.exists() and any(cache_dir.iterdir())
+    click.echo(f"model cache  {'ok' if cache_ok else 'missing — run: cortex pull-models'}")
+
+    claude = shutil.which("claude")
+    mcp_status = "claude not found in PATH"
+    if claude:
+        r = subprocess.run([claude, "mcp", "list"], capture_output=True, text=True)
+        output = r.stdout + r.stderr
+        if "cortex" in output.lower():
+            lines = [l for l in output.splitlines() if "cortex" in l.lower()]
+            mcp_status = lines[0].strip() if lines else "registered"
+        else:
+            mcp_status = "not registered — run: cortex install"
+    click.echo(f"MCP          {mcp_status}")
+
+    ws = get_active_workspace()
+    indexed = Path(qdrant_path(ws)).exists()
+    click.echo(f"workspace    {ws} ({'indexed' if indexed else 'not indexed'})")
+
+    last = get_config()["index"].get("last_path") or "(none)"
+    click.echo(f"last indexed {last}")
