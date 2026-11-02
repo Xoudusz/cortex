@@ -9,7 +9,14 @@ pipx install cortex-local
 cortex install
 ```
 
-`cortex install` downloads embedding models and registers the MCP server in Claude Code. Restart Claude Code after.
+`cortex install` downloads embedding models and registers the MCP server in Claude Code with `--scope user` (available in all projects). Restart Claude Code after.
+
+## Update
+
+```bash
+pipx upgrade cortex-local
+cortex install   # re-registers MCP (idempotent)
+```
 
 ### Legacy CPUs (no SSE4.2 / X86_V2)
 
@@ -27,6 +34,8 @@ cortex install
 ```bash
 cortex index ~/notes          # index Obsidian vault
 cortex index ~/projects/myapp # index a code repo
+cortex doctor                 # check version, MCP registration, workspace, index status
+cortex uninstall              # remove MCP registration
 ```
 
 Then in Claude Code, `search_notes` and `search_code` are available as MCP tools.
