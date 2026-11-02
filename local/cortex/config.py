@@ -6,6 +6,7 @@ import tomllib
 from pathlib import Path
 
 CORTEX_DIR = Path.home() / ".cortex"
+MODELS_DIR = CORTEX_DIR / "models"
 WORKSPACES_DIR = CORTEX_DIR / "workspaces"
 ACTIVE_WORKSPACE_FILE = CORTEX_DIR / "active_workspace"
 CONFIG_FILE = CORTEX_DIR / "config.toml"

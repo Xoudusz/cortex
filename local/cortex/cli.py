@@ -11,7 +11,7 @@ import click
 
 from .config import (
     WORKSPACES_DIR, get_active_workspace, set_active_workspace, get_workspace_dir,
-    data_dir, save_last_indexed_path, qdrant_path, get_config, VERSION,
+    data_dir, save_last_indexed_path, qdrant_path, get_config, VERSION, MODELS_DIR,
 )
 
 
@@ -161,8 +161,15 @@ def search_log_cmd(top: int) -> None:
             click.echo(f"  {q}")
 
 
-_SYSTEM_DIRS = {"/", "/usr", "/bin", "/etc", "/sbin", "/var", r"C:\Windows"}
+_SYSTEM_PREFIXES = [Path(p) for p in ("/usr", "/bin", "/etc", "/sbin", "/var", r"C:\Windows")]
 _SCOPE_CHOICES = click.Choice(["user", "local", "project"])
+
+
+def _is_system_dir(p: Path) -> bool:
+    r = p.resolve()
+    if r == Path("/"):
+        return True
+    return any(prefix.exists() and r.is_relative_to(prefix) for prefix in _SYSTEM_PREFIXES)
 
 
 @cli.command("install")
@@ -171,8 +178,8 @@ _SCOPE_CHOICES = click.Choice(["user", "local", "project"])
 def install_cmd(scope: str) -> None:
     """Download embedding models and register cortex MCP in Claude Code."""
     from .embedder import pull_models as _pull
-    cwd = str(Path.cwd())
-    if scope != "user" and cwd in _SYSTEM_DIRS:
+    cwd = Path.cwd()
+    if scope != "user" and _is_system_dir(cwd):
         click.echo(f"Warning: cwd looks like a system directory ({cwd}). Use --scope user to register globally.")
     click.echo("Downloading embedding models...")
     _pull()
@@ -223,18 +230,16 @@ def doctor_cmd() -> None:
     """Show cortex status: version, model cache, MCP registration, workspace, index."""
     click.echo(f"version      {VERSION}")
 
-    cache_dir = Path.home() / ".cache" / "fastembed"
-    cache_ok = cache_dir.exists() and any(cache_dir.iterdir())
+    cache_ok = MODELS_DIR.exists() and any(MODELS_DIR.iterdir())
     click.echo(f"model cache  {'ok' if cache_ok else 'missing — run: cortex pull-models'}")
 
     claude = shutil.which("claude")
     mcp_status = "claude not found in PATH"
     if claude:
-        r = subprocess.run([claude, "mcp", "list"], capture_output=True, text=True)
-        output = r.stdout + r.stderr
-        if "cortex" in output.lower():
-            lines = [l for l in output.splitlines() if "cortex" in l.lower()]
-            mcp_status = lines[0].strip() if lines else "registered"
+        r = subprocess.run([claude, "mcp", "get", "cortex"], capture_output=True, text=True)
+        if r.returncode == 0:
+            detail = r.stdout.strip().splitlines()[0] if r.stdout.strip() else "registered"
+            mcp_status = detail
         else:
             mcp_status = "not registered — run: cortex install"
     click.echo(f"MCP          {mcp_status}")
@@ -245,3 +250,15 @@ def doctor_cmd() -> None:
 
     last = get_config()["index"].get("last_path") or "(none)"
     click.echo(f"last indexed {last}")
+
+    claude_json = Path.home() / ".claude.json"
+    if claude_json.exists():
+        try:
+            projects = json.loads(claude_json.read_text()).get("projects", {})
+            stale = [p for p, v in projects.items() if "cortex" in v.get("mcpServers", {})]
+            if stale:
+                click.echo("\nStale local registrations (run from each dir to remove):")
+                for p in stale:
+                    click.echo(f"  cd {p} && claude mcp remove cortex --scope local")
+        except Exception:
+            pass

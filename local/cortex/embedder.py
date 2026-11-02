@@ -5,7 +5,7 @@ import os
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 
-from .config import EMBED_MODEL
+from .config import EMBED_MODEL, MODELS_DIR
 
 _dense = None
 _sparse = None
@@ -30,7 +30,7 @@ def embed(text: str) -> list:
     global _dense
     if _dense is None:
         from fastembed import TextEmbedding
-        _dense = TextEmbedding(EMBED_MODEL)
+        _dense = TextEmbedding(EMBED_MODEL, cache_dir=str(MODELS_DIR))
     return list(_dense.embed([text[:4000]]))[0].tolist()
 
 
@@ -39,7 +39,7 @@ def sparse_embed(text: str) -> tuple:
     global _sparse
     if _sparse is None:
         from fastembed import SparseTextEmbedding
-        _sparse = SparseTextEmbedding("Qdrant/bm25")
+        _sparse = SparseTextEmbedding("Qdrant/bm25", cache_dir=str(MODELS_DIR))
     e = list(_sparse.embed([text[:4000]]))[0]
     return e.indices.tolist(), e.values.tolist()
 
