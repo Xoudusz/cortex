@@ -94,7 +94,8 @@ def _mask(text: str) -> str:
 
 def git_error(stderr: str) -> str:
     """Last meaningful git stderr lines (token masked) plus a hint for the common causes."""
-    lines = [l.strip() for l in _mask(stderr or "").splitlines() if l.strip()]
+    lines = [l.strip() for l in _mask(stderr or "").splitlines()
+             if l.strip() and not l.strip().startswith("Cloning into")]
     msg = " | ".join(lines[-3:]) or "git printed no error"
     low = msg.lower()
     if "authentication failed" in low or "could not read username" in low or "403" in low:
