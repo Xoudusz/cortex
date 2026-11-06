@@ -20,7 +20,9 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # push to main: self-hosted runner on portainer-lxc (no Actions minutes).
+    # pull requests: GitHub-hosted, so fork PRs never execute on the homelab runner.
+    runs-on: ${{ github.event_name == 'push' && fromJSON('["self-hosted","lxc"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +51,8 @@ jobs:
   test-windows:
     # Issue #4: git installs on Windows shipped without cortex.core. Build a real
     # (non-editable) wheel and check `cortex serve` answers MCP initialize over stdio.
+    # PRs only: Windows minutes are billed 2x and main is gated by the PR run.
+    if: github.event_name == 'pull_request'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,9 +73,9 @@ jobs:
         run: python local/tests/test_stdio_init.py
 
   build:
-    needs: [test, test-windows]
+    needs: [test]
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, lxc]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -107,6 +111,11 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          # runner has no Docker socket; builds run on the buildkitd container
+          # (compose-stacks: infrastructure/github-runner.yml)
+          driver: remote
+          endpoint: tcp://buildkitd:1234
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -123,8 +132,6 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           build-args: GIT_COMMIT=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Tag and release
         if: steps.check.outputs.new == 'true'
