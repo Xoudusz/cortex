@@ -1,4 +1,7 @@
-"""Cortex local MCP server — stdio transport, all 8 tools, embedded Qdrant."""
+"""Cortex local MCP server — stdio transport, embedded Qdrant.
+
+stdout is the JSON-RPC channel: nothing in this process may print. Use logging (file).
+"""
 
 import json
 import logging
@@ -9,18 +12,21 @@ from pathlib import Path
 
 
 from mcp.server.mcpserver import MCPServer
-from qdrant_client import QdrantClient
 from qdrant_client.models import Prefetch, Fusion, SparseVector
 
+from . import db
 from .config import (
-    qdrant_path, data_dir, stats_file, VERSION, VECTOR_SIZE,
+    data_dir, stats_file, VERSION,
     WORKSPACES_DIR, get_active_workspace, set_active_workspace,
     get_workspace_dir, PPR_THRESHOLD, get_config, ensure_index_schema,
+    get_roots, read_index_meta,
 )
 from .embedder import embed, sparse_embed
 from .state import _stats, get_graph_meta, save_stats, invalidate_graph_cache
 from .indexer import index_path
-from .core.formatters import format_notes_parts, format_code_results, fmt_stats
+from .core.formatters import (
+    format_notes_parts, format_code_results, fmt_stats, fmt_age, fmt_index_roots,
+)
 
 mcp = MCPServer("cortex", version=VERSION)
 log = logging.getLogger("cortex")
@@ -47,33 +53,75 @@ def _log_search(tool: str, query: str, top: list) -> None:
 _reindex_state: dict = {
     "running": False, "started_at": None, "output": [], "error": None, "done": False,
 }
-_reindex_path: str = ""
+_watcher = None
+_watched: tuple = ()
 
 
-def _qdrant() -> QdrantClient:
-    return QdrantClient(path=qdrant_path())
+def _qdrant():
+    return db.client()
 
 
 # ── Reindex ─────────────────────────────────────────────────────────────────
 
-def _run_reindex(path_str: str) -> None:
-    _reindex_state.update(running=True, started_at=time.time(), output=[], error=None, done=False)
-    # Capture indexer log lines for reindex_status(). Never print: stdout is the MCP channel.
-    capture = _ListHandler(_reindex_state["output"])
-    logging.getLogger("cortex").addHandler(capture)
-    log.info("reindex started: %s", path_str)
-    try:
-        index_path(Path(path_str))
-        _stats["reindex_count"] += 1
-        log.info("reindex finished: %s (%.0fs)", path_str, time.time() - _reindex_state["started_at"])
-    except Exception as e:
-        _reindex_state["error"] = str(e)
-        log.exception("reindex failed: %s", path_str)
-    finally:
-        logging.getLogger("cortex").removeHandler(capture)
-        _reindex_state["running"] = False
-        _reindex_state["done"] = True
-        save_stats()
+def _index_roots(paths: list, source: str) -> None:
+    """Index paths one after another. Serialized with every other index run via db.index_lock."""
+    with db.index_lock:
+        _reindex_state.update(running=True, started_at=time.time(), output=[], error=None, done=False)
+        # Capture indexer log lines for reindex_status().
+        capture = _ListHandler(_reindex_state["output"])
+        logging.getLogger("cortex").addHandler(capture)
+        try:
+            for path_str in paths:
+                t0 = time.time()
+                log.info("reindex (%s) started: %s", source, path_str)
+                try:
+                    index_path(Path(path_str))
+                    _stats["reindex_count"] += 1
+                    log.info("reindex finished: %s (%.0fs)", path_str, time.time() - t0)
+                except BaseException as e:  # SystemExit from a locked db must not kill the thread silently
+                    _reindex_state["error"] = str(e)
+                    log.exception("reindex failed: %s", path_str)
+        finally:
+            logging.getLogger("cortex").removeHandler(capture)
+            _reindex_state["running"] = False
+            _reindex_state["done"] = True
+            save_stats()
+    _restart_watcher()  # pick up newly added roots
+
+
+def _restart_watcher(force: bool = False) -> None:
+    """(Re)start the file watcher for the active workspace's roots; no-op if they're unchanged."""
+    global _watcher, _watched
+    cfg = get_config()
+    roots = get_roots() if cfg["watch"]["enabled"] else []
+    key = (get_active_workspace(), tuple(sorted(roots)))
+    if key == _watched and not force:
+        return
+    if _watcher is not None:
+        _watcher.stop()
+        _watcher = None
+    _watched = key
+    if not roots:
+        return
+    from .watcher import CortexWatcher
+    _watcher = CortexWatcher(roots, cfg["watch"]["debounce_seconds"],
+                             lambda root: _index_roots([root.as_posix()], "watcher"))
+    _watcher.start()
+
+
+def _index_header() -> str:
+    """One line telling the agent how fresh the index is."""
+    roots = read_index_meta().get("roots", {})
+    if not roots:
+        return "_index: empty - call reindex(path)_"
+    now = time.time()
+    parts = []
+    for root, m in sorted(roots.items()):
+        head = f"@{m['git_head']} " if m.get("git_head") else ""
+        age = fmt_age(now - m["indexed_at"]) if m.get("indexed_at") else "?"
+        parts.append(f"{root} {head}{age} ago")
+    watching = " (auto-reindex on)" if _watcher is not None else " (auto-reindex off)"
+    return "_index: " + "; ".join(parts) + watching + "_"
 
 
 # ── PPR helper ───────────────────────────────────────────────────────────────
@@ -198,7 +246,8 @@ def search_notes(query: str, limit: int = 5) -> str:
     _log_search("search_notes", query, [
         {"file": f, "score": round(s, 3)} for f, s in zip(matched_files, matched_scores)
     ])
-    return out
+    log.info("search_notes %r -> %d hits", query, len(matched_files))
+    return f"{_index_header()}\n\n{out}"
 
 
 @mcp.tool()
@@ -211,7 +260,8 @@ def search_code(query: str, limit: int = 5) -> str:
     _stats["search_code_calls"] += 1
     out, log_entries = _search_code(query, limit)
     _log_search("search_code", query, log_entries)
-    return out
+    log.info("search_code %r -> %d hits", query, len(log_entries))
+    return f"{_index_header()}\n\n{out}"
 
 
 @mcp.tool()
@@ -220,31 +270,38 @@ def search_all(query: str, limit: int = 5) -> str:
 
     Use when unsure whether the answer is in notes or code,
     or when you want a combined view across both collections.
+    limit applies per collection: limit=3 returns up to 3 notes AND up to 3 code hits.
     """
     _stats["search_notes_calls"] += 1
     _stats["search_code_calls"] += 1
     notes_out, matched_files, matched_scores = _search_notes(query, limit)
     code_out, log_entries = _search_code(query, limit)
     _log_search("search_all", query, log_entries)
-    return f"## Notes\n\n{notes_out}\n\n## Code\n\n{code_out}"
+    log.info("search_all %r -> notes=%d code=%d", query, len(matched_files), len(log_entries))
+    return f"{_index_header()}\n\n## Notes\n\n{notes_out}\n\n## Code\n\n{code_out}"
 
 
 @mcp.tool()
 def reindex(path: str = "") -> str:
-    """Re-index a path into the local Qdrant database.
+    """Re-index a directory into the local index (incremental: only changed files are re-embedded).
 
     Runs async — returns immediately. Call reindex_status() to check progress.
-    path: directory to index (defaults to last indexed path).
+    path: directory to index; a new path is added as an index root and watched afterwards.
+          Empty = re-index every existing root of the active workspace.
     """
-    global _reindex_path
-    target = path or _reindex_path
-    if not target:
-        return "Error: no path specified and no previous path recorded. Pass a path to index."
-    _reindex_path = target
-    if _reindex_state["running"]:
+    if path:
+        p = Path(path).expanduser()
+        if not p.is_dir():
+            return f"Error: '{path}' is not a directory."
+        targets = [p.resolve().as_posix()]
+    else:
+        targets = get_roots()
+        if not targets:
+            return "Error: nothing indexed yet in this workspace. Pass a path to index."
+    if _reindex_state["running"] or db.index_lock.locked():
         return "Reindex already running. Call reindex_status() to check progress."
-    threading.Thread(target=_run_reindex, args=(target,), daemon=True).start()
-    return f"Reindex queued for '{target}'. Use reindex_status() to check progress."
+    threading.Thread(target=_index_roots, args=(targets, "tool"), daemon=True).start()
+    return f"Reindex queued for {', '.join(targets)}. Use reindex_status() to check progress."
 
 
 @mcp.tool()
@@ -281,7 +338,23 @@ def get_stats(all: bool = False) -> str:
         for v in sorted(versions):
             blocks.append(fmt_stats(v, versions[v], current=(v == VERSION)))
         return "\n\n".join(blocks)
-    return fmt_stats(VERSION, _stats, current=True)
+    return _index_summary() + "\n\n" + fmt_stats(VERSION, _stats, current=True)
+
+
+def _index_summary(ws: str | None = None) -> str:
+    ws = ws or get_active_workspace()
+    roots = read_index_meta(ws).get("roots", {})
+    lines = [f"workspace: {ws}"]
+    if not roots:
+        lines.append("  index: empty")
+    else:
+        notes = sum(m.get("notes", 0) for m in roots.values())
+        code = sum(m.get("code", 0) for m in roots.values())
+        lines.append(f"  chunks: notes={notes} code={code}")
+        lines += [f"  root: {line}" for line in fmt_index_roots(roots)]
+    if ws == get_active_workspace():
+        lines.append(f"  auto-reindex: {'on' if _watcher is not None else 'off'}")
+    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -404,15 +477,15 @@ def switch_workspace(name: str) -> str:
         )
     set_active_workspace(name)
     invalidate_graph_cache()
+    db.reset()
+    _restart_watcher(force=True)
+    log.info("switched workspace to '%s'", name)
     return f"Switched to workspace '{name}'. search_code and search_notes now use this workspace's index."
 
 
 @mcp.tool()
 def list_workspaces() -> str:
-    """List all cortex workspaces and their status.
-
-    Shows which workspace is currently active and whether each has an index.
-    """
+    """List all cortex workspaces: active marker, index roots, chunk counts and index age."""
     active = get_active_workspace()
     if not WORKSPACES_DIR.exists():
         return f"No workspaces found. Active: '{active}' (not yet indexed)."
@@ -422,8 +495,7 @@ def list_workspaces() -> str:
     lines = [f"Active workspace: {active}\n"]
     for ws in workspaces:
         marker = "* " if ws == active else "  "
-        has_index = (WORKSPACES_DIR / ws / "qdrant").exists()
-        lines.append(f"{marker}{ws} ({'indexed' if has_index else 'empty'})")
+        lines.append(marker + _index_summary(ws).replace("\n", "\n  "))
     return "\n".join(lines)
 
 
@@ -454,12 +526,12 @@ def run() -> None:
         )],
         force=True,
     )
-    log.info("cortex %s starting (workspace: %s)", VERSION, get_active_workspace())
+    log.info("cortex %s starting (workspace: %s, log: %s)", VERSION, get_active_workspace(), log_path)
     ensure_index_schema()
-    cfg = get_config()
-    if cfg["watch"]["enabled"]:
-        last = cfg["index"].get("last_path", "")
-        if last and Path(last).exists():
-            from .watcher import CortexWatcher
-            CortexWatcher(Path(last), cfg["watch"]["debounce_seconds"]).start()
+    try:
+        _restart_watcher()
+    except Exception:
+        log.exception("watcher failed to start")
+    for line in _index_summary().splitlines():
+        log.info(line)
     mcp.run(transport="stdio")

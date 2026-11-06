@@ -55,12 +55,9 @@ def test_save_last_indexed_path_roundtrip():
         with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
             config.save_last_indexed_path(a)
             config.save_last_indexed_path(b)
-            config.save_last_indexed_path(a)  # re-index moves to end, no duplicate
             cfg = config.get_config()
-            assert cfg["index"]["last_path"] == Path(a).resolve().as_posix()
-            assert cfg["index"]["roots"] == [Path(b).resolve().as_posix(), Path(a).resolve().as_posix()]
+            assert cfg["index"]["last_path"] == Path(b).resolve().as_posix()
             assert cfg["watch"]["enabled"] is True
-            assert config.get_roots() == cfg["index"]["roots"]
 
 
 def test_save_last_indexed_path_heals_corrupt_config():

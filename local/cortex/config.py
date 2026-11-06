@@ -14,7 +14,7 @@ CONFIG_FILE = CORTEX_DIR / "config.toml"
 
 _CONFIG_DEFAULTS: dict = {
     "watch": {"enabled": True, "debounce_seconds": 2.0},
-    "index": {"last_path": "", "roots": [], "exclude_patterns": []},
+    "index": {"last_path": "", "exclude_patterns": []},
 }
 _config_cache: dict | None = None
 
@@ -62,7 +62,8 @@ def stats_file(ws: str | None = None) -> Path:
 
 # Bump when stored payloads change incompatibly; older indexes are wiped and rebuilt.
 # 2: POSIX payload paths (2.4.5 stored backslashes on Windows).
-INDEX_SCHEMA = 2
+# 3: `root` payload + root-scoped point ids / cache keys (incremental deletes, multi-root).
+INDEX_SCHEMA = 3
 
 
 def index_meta_file(ws: str | None = None) -> Path:
@@ -100,7 +101,7 @@ def ensure_index_schema(ws: str | None = None) -> bool:
         if f.exists():
             f.unlink()
             wiped = True
-    meta["schema"] = INDEX_SCHEMA
+    meta = {"schema": INDEX_SCHEMA, "roots": {}}
     write_index_meta(meta, ws)
     if wiped:
         import logging
@@ -154,21 +155,16 @@ def save_config(cfg: dict) -> None:
 
 
 def save_last_indexed_path(path: str) -> None:
-    """Record PATH as last indexed and add it to index.roots (stored as POSIX)."""
-    posix = Path(path).resolve().as_posix()
+    """Record PATH as last indexed (stored as POSIX)."""
     cfg = {k: dict(v) for k, v in get_config().items()}
-    cfg["index"]["last_path"] = posix
-    roots = [r for r in cfg["index"].get("roots", []) if r != posix]
-    cfg["index"]["roots"] = roots + [posix]
+    cfg["index"]["last_path"] = Path(path).resolve().as_posix()
+    cfg["index"].pop("roots", None)  # 2.4.6 kept roots here; now per workspace in index_meta.json
     save_config(cfg)
 
 
-def get_roots() -> list:
-    """Indexed roots that still exist (falls back to last_path for pre-2.4.6 configs)."""
-    idx = get_config()["index"]
-    roots = list(idx.get("roots") or [])
-    if not roots and idx.get("last_path"):
-        roots = [idx["last_path"]]
+def get_roots(ws: str | None = None) -> list:
+    """Index roots of a workspace that still exist on disk (from index_meta.json)."""
+    roots = list(read_index_meta(ws).get("roots", {}))
     return [r for r in roots if Path(r).exists()]
 
 
