@@ -19,7 +19,7 @@ from routes import (
     health, favicon, webhook,
     _ui_handler, _api_search_handler, _api_status_handler, _api_reindex_handler,
     _api_stats_handler, _api_graph_handler, _api_repos_handler, _api_repos_delete,
-    _api_repos_meta_handler, _api_github_repos, _api_webhook_log_handler,
+    _api_repos_meta_handler, _api_github_repos, _api_settings_handler, _api_webhook_log_handler,
     _api_reindex_log_handler, _api_logs_handler, _api_clear_cache_handler,
 )
 from tools import mcp
@@ -72,6 +72,7 @@ Route("/api/clear-cache", _api_clear_cache_handler, methods=["POST"]),
         Route("/api/repos/{repo:path}", _api_repos_delete, methods=["DELETE"]),
         Route("/api/repos-meta", _api_repos_meta_handler, methods=["GET"]),
         Route("/api/github/repos", _api_github_repos, methods=["GET"]),
+        Route("/api/settings", _api_settings_handler, methods=["GET", "PUT", "DELETE"]),
         Route("/api/webhook-log", _api_webhook_log_handler, methods=["GET"]),
         Route("/api/reindex-log", _api_reindex_log_handler, methods=["GET"]),
         Route("/api/logs", _api_logs_handler, methods=["GET"]),

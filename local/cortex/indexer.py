@@ -18,7 +18,7 @@ from qdrant_client.models import (
 from . import db
 from .config import data_dir, cache_file, VECTOR_SIZE, get_config, read_index_meta, write_index_meta
 from .embedder import embed, sparse_embed
-from .core.chunker import chunk_file, CODE_EXTS, SKIP_DIRS, _is_excluded
+from .core.chunker import chunk_file, CODE_EXTS, SKIP_DIRS, _is_excluded, repo_ignore_patterns
 from .core.cache import load_cache, save_cache
 from .core import graph as _graph
 from .core import roslyn_analyzer as _roslyn
@@ -171,7 +171,7 @@ def index_notes(notes_dir: Path, show_progress: bool = False) -> int:
     Changed files have their old points deleted first; files gone from disk (or newly
     excluded) are removed from the index.
     """
-    exclude_patterns = get_config()["index"]["exclude_patterns"]
+    exclude_patterns = get_config()["index"]["exclude_patterns"] + repo_ignore_patterns(notes_dir)
     root = notes_dir.resolve().as_posix()
     prefix = root + "/"
 
@@ -235,7 +235,7 @@ def index_code(code_dir: Path, show_progress: bool = False) -> int:
 
     Same incremental contract as index_notes: changed files are replaced, deleted files removed.
     """
-    exclude_patterns = get_config()["index"]["exclude_patterns"]
+    exclude_patterns = get_config()["index"]["exclude_patterns"] + repo_ignore_patterns(code_dir)
     repo_name = code_dir.name
     root = code_dir.resolve().as_posix()
     prefix = root + "/"

@@ -88,7 +88,7 @@ OAuth login opens in browser on first connection. Tokens persist (30-day access,
 |-----|---------|---------|
 | `ADMIN_PASSWORD` | — | Required — OAuth login password |
 | `BASE_URL` | `http://localhost:8765` | Public URL for OAuth metadata |
-| `GITHUB_TOKEN` | — | For cloning private repos |
+| `GITHUB_TOKEN` | — | For listing/cloning private repos. Use a **classic PAT with `repo` scope** for repos you collaborate on. Dashboard Admin → Settings overrides it |
 | `WEBHOOK_SECRET` | — | GitHub webhook HMAC validation |
 | `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant endpoint |
@@ -169,3 +169,8 @@ Built-in OAuth 2.0 AS — no external provider needed.
 - Authorization code + refresh token flow
 - 30-day access tokens, 90-day refresh tokens
 - State persists in `/app/data/oauth_state.json` across restarts
+
+## Excluding files per repo
+
+Put a `.cortexignore` in the repo root (gitignore-like: `addons/gut/`, `/vendor` anchored, `*.min.js`, `#` comments; no `!` negation). Directories containing a `.gdignore` (Godot) and `.godot/` are always skipped. Files that become excluded are removed from the index on the next full reindex.
+

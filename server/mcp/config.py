@@ -2,6 +2,7 @@
 """Environment variables, constants, and embedding utilities for cortex-mcp."""
 
 import logging
+import json
 import os
 from pathlib import Path
 
@@ -30,6 +31,32 @@ DATA_DIR       = Path(REPOS_CONFIG).parent
 VERSION        = (Path("/app/VERSION").read_text().strip()
                   if Path("/app/VERSION").exists() else "dev")
 STATS_FILE     = DATA_DIR / "stats.json"
+SETTINGS_FILE  = DATA_DIR / "settings.json"   # dashboard-managed secrets (mode 600)
+
+
+def read_settings() -> dict:
+    try:
+        return json.loads(SETTINGS_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def write_settings(settings: dict) -> None:
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SETTINGS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(settings, indent=2))
+    os.chmod(tmp, 0o600)
+    tmp.replace(SETTINGS_FILE)
+
+
+def get_github_token() -> tuple[str, str]:
+    """(token, source): dashboard setting wins over the GITHUB_TOKEN env var."""
+    tok = read_settings().get("github_token", "")
+    if tok:
+        return tok, "settings"
+    if GITHUB_TOKEN:
+        return GITHUB_TOKEN, "env"
+    return "", "none"
 WORKSPACE      = os.environ.get("CORTEX_WORKSPACE", "default")
 PPR_THRESHOLD  = float(os.environ.get("PPR_THRESHOLD") or "0.03")
 ALLOWED_HOSTS  = [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()]

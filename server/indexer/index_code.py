@@ -12,7 +12,7 @@ import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelector, MatchValue, PointStruct, SparseVector, SparseVectorParams, VectorParams
 
-from chunker import chunk_file, CODE_EXTS, SKIP_DIRS, REPOS_DIR, _is_excluded
+from chunker import chunk_file, CODE_EXTS, SKIP_DIRS, REPOS_DIR, _is_excluded, repo_ignore_patterns
 from cache import load_cache, save_cache
 import roslyn_analyzer
 
@@ -107,6 +107,16 @@ def git_error(stderr: str) -> str:
     return msg
 
 
+def _delete_file_points(client, repo_name: str, rel: str) -> None:
+    try:
+        client.delete(COLLECTION, points_selector=FilterSelector(filter=Filter(must=[
+            FieldCondition(key="repo", match=MatchValue(value=repo_name)),
+            FieldCondition(key="file", match=MatchValue(value=rel)),
+        ])))
+    except Exception as e:
+        print(f"  warn: delete {rel}: {e}", flush=True)
+
+
 def clone_or_pull(repo: str) -> Path:
     name = repo.split("/")[1]
     dest = REPOS_DIR / name
@@ -184,6 +194,9 @@ def main():
             continue
 
         incremental = args.files is not None or args.remove_files is not None
+        excludes = EXCLUDE_PATTERNS + repo_ignore_patterns(repo_path)
+        if len(excludes) > len(EXCLUDE_PATTERNS):
+            print(f"  {name}: {len(excludes) - len(EXCLUDE_PATTERNS)} exclude pattern(s) from .cortexignore/.gdignore", flush=True)
         if incremental:
             all_to_delete = list(set((args.files or []) + (args.remove_files or [])))
             if all_to_delete:
@@ -203,6 +216,7 @@ def main():
                 repo_path / f for f in (args.files or [])
                 if (repo_path / f).exists() and Path(f).suffix in CODE_EXTS
                 and not any(s in Path(f).parts for s in SKIP_DIRS)
+                and not _is_excluded(Path(f).as_posix(), excludes)
             ]
             print(f"  {name}: incremental — {len(code_files)} files to re-index, {len(args.remove_files or [])} removed", flush=True)
         else:
@@ -210,7 +224,7 @@ def main():
                 p for p in repo_path.rglob("*")
                 if p.is_file() and p.suffix in CODE_EXTS
                 and not any(s in p.parts for s in SKIP_DIRS)
-                and not _is_excluded(str(p.relative_to(repo_path)), EXCLUDE_PATTERNS)
+                and not _is_excluded(p.relative_to(repo_path).as_posix(), excludes)
             ]
 
         if not incremental:
@@ -250,6 +264,8 @@ def main():
                     new_file_cache[cache_key] = {"mtime": mtime, "hash": content_hash}
                     cached_files += 1
                     continue
+                # changed file: drop its old chunks (ids depend on start_line, so they'd linger)
+                _delete_file_points(client, name, rel_path)
 
             points = []
             for chunk in chunk_file(path, name, base_dir=repo_path, roslyn_data=roslyn_data.get(rel_path)):
@@ -271,6 +287,15 @@ def main():
                     new_file_cache[cache_key] = {"mtime": mtime, "hash": content_hash}
 
         if not incremental:
+            # files gone from disk or newly excluded: remove their chunks + cache entries
+            prefix = f"{name}/"
+            current = {f"{name}/{p.relative_to(repo_path).as_posix()}" for p in code_files}
+            gone = [k for k in file_cache if k.startswith(prefix) and k not in current]
+            for k in gone:
+                _delete_file_points(client, name, k[len(prefix):])
+                new_file_cache.pop(k, None)
+            if gone:
+                print(f"  {name}: removed {len(gone)} deleted/excluded file(s) from the index", flush=True)
             save_cache("code", new_file_cache)
         embedded_count = len(code_files) - cached_files
         print(f"  {name}: {total} chunks from {embedded_count} files ({cached_files} cached)", flush=True)
@@ -285,6 +310,7 @@ def main():
             for p in repo_path.rglob("*")
             if p.is_file() and p.suffix in CODE_EXTS
             and not any(s in p.parts for s in SKIP_DIRS)
+            and not _is_excluded(p.relative_to(repo_path).as_posix(), excludes)
         )
 
         try:

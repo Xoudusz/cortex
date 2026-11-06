@@ -181,6 +181,11 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         </div>
 
         <div id="repos-panel" class="panel">
+            <form id="repo-add-form" style="display:flex;gap:0.5rem;margin-bottom:0.75rem">
+                <input id="repo-add-input" placeholder="owner/name (e.g. someone/their-repo)" autocomplete="off" style="flex:1">
+                <button type="submit">Add repo</button>
+            </form>
+            <div id="repo-gh-warning" style="display:none;font-size:0.8rem;color:var(--text-muted);margin-bottom:0.5rem"></div>
             <div id="repo-list"></div>
             <div id="repo-message" style="margin-top:0.75rem"></div>
         </div>
@@ -196,6 +201,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <button class="admin-tab" data-admin-tab="graph">Graph Efficiency</button>
                 <button class="admin-tab" data-admin-tab="webhooks">Webhooks</button>
                 <button class="admin-tab" data-admin-tab="logs">Logs</button>
+                <button class="admin-tab" data-admin-tab="settings">Settings</button>
             </div>
             <div id="admin-reindex" class="admin-section active">
                 <div class="reindex-buttons">
@@ -220,6 +226,20 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             </div>
             <div id="admin-webhooks" class="admin-section">
                 <div id="webhook-log-wrap"><div class="empty">No webhooks received yet.</div></div>
+            </div>
+            <div id="admin-settings" class="admin-section">
+                <div class="section-title">GitHub token</div>
+                <div id="token-status" style="font-size:0.85rem;margin-bottom:0.75rem;color:var(--text-muted)">Loading...</div>
+                <form id="token-form" style="display:flex;gap:0.5rem;flex-wrap:wrap">
+                    <input id="token-input" type="password" placeholder="ghp_... or github_pat_..." autocomplete="off" style="flex:1;min-width:220px">
+                    <button type="submit">Save</button>
+                    <button type="button" id="token-clear" class="secondary">Clear (use env var)</button>
+                </form>
+                <div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.6rem;line-height:1.5">
+                    Used to list repos and clone/pull private repos. Checked against GitHub before saving; stored in <code>data/settings.json</code> (mode 600), overrides the <code>GITHUB_TOKEN</code> env var.<br>
+                    Private repos owned by <b>someone else</b> (you are a collaborator) need a <b>classic</b> PAT with <code>repo</code> scope; fine-grained PATs can't see them.
+                </div>
+                <div id="token-message" style="margin-top:0.6rem"></div>
             </div>
             <div id="admin-logs" class="admin-section">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem"><span style="font-size:0.75rem;color:var(--text-muted)">Last 200 lines</span><div style="display:flex;gap:0.5rem;align-items:center"><label style="font-size:0.75rem;color:var(--text-muted);cursor:pointer"><input type="checkbox" id="log-tail-toggle" style="margin-right:0.25rem">tail</label><button onclick="loadLogs()" class="secondary" style="padding:0.2rem 0.6rem;font-size:0.75rem">Refresh</button></div></div>
@@ -415,6 +435,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 if (tab.dataset.adminTab === 'graph') loadStats();
                 if (tab.dataset.adminTab === 'webhooks') loadWebhookLog();
                 if (tab.dataset.adminTab === 'logs') loadLogs();
+                if (tab.dataset.adminTab === 'settings') loadTokenStatus();
             });
         });
 
@@ -651,8 +672,17 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 const meta = metaRes.status === 'fulfilled' ? metaRes.value : { repos: [], indexed_at: {} };
                 const indexedList = meta.repos || [];
                 const indexedAt = meta.indexed_at || {};
-                const ghRepos = ghRes.status === 'fulfilled' ? (ghRes.value.repos || []) : indexedList;
-                renderRepos(ghRepos, indexedList, indexedAt);
+                const warn = document.getElementById('repo-gh-warning');
+                let ghRepos = [];
+                if (ghRes.status === 'fulfilled' && ghRes.value) {
+                    ghRepos = ghRes.value.repos || [];
+                    warn.style.display = 'none';
+                } else {
+                    warn.textContent = 'GitHub repo list unavailable: ' + (ghRes.reason ? ghRes.reason.message : 'unknown error') + '. Set a token in Admin > Settings, or add repos by name above.';
+                    warn.style.display = 'block';
+                }
+                // tracked repos stay visible even if the token can't list them (added by name)
+                renderRepos([...new Set([...ghRepos, ...indexedList])], indexedList, indexedAt);
             } catch (err) { listDiv.innerHTML = '<div class="message error">' + escapeHtml(err.message) + '</div>'; }
         }
 
@@ -672,6 +702,58 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             listDiv.querySelectorAll('.repo-remove-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; try { const data = await api('/api/repos/' + encodeURIComponent(repo), { method: 'DELETE' }); renderRepos(allRepos, data.repos || [], indexedAt); showRepoMsg('Removed ' + repo.split('/')[1] + ' from index', 'info'); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); } }); });
             listDiv.querySelectorAll('.repo-add-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; btn.disabled = true; btn.textContent = '...'; try { const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo }) }); renderRepos(allRepos, data.repos || [], indexedAt); const name = repo.split('/')[1]; showRepoMsg('Added ' + name + ' — indexing...', 'info'); await triggerReindex(false, true, name); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); btn.disabled = false; btn.textContent = 'Add to index'; } }); });
         }
+
+        document.getElementById('repo-add-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const input = document.getElementById('repo-add-input');
+            const repo = input.value.trim().replace(/^https:[/][/]github.com[/]/, '').replace(/[.]git$/, '');
+            const parts = repo.split('/');
+            if (parts.length !== 2 || !parts[0] || !parts[1]) { showRepoMsg('Use owner/name', 'error'); return; }
+            try {
+                await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo }) });
+                input.value = '';
+                showRepoMsg('Added ' + repo + ' - indexing...', 'info');
+                await triggerReindex(false, true, parts[1]);
+                loadRepos(); loadRepoFilter();
+            } catch (err) { showRepoMsg(err.message, 'error'); }
+        });
+
+        function renderTokenStatus(info) {
+            const el = document.getElementById('token-status');
+            if (!info.set) { el.textContent = 'No token configured. Private repos cannot be listed or cloned.'; return; }
+            const src = info.source === 'settings' ? 'dashboard setting' : 'GITHUB_TOKEN env var';
+            let text = info.type + ' token ' + info.hint + ' from ' + src;
+            if (info.login) text += ' - authenticated as ' + info.login;
+            if (info.scopes && info.scopes.length) text += ' - scopes: ' + info.scopes.join(', ');
+            if (info.error) text += ' - ERROR: ' + info.error;
+            if (info.type === 'classic' && info.scopes && !info.scopes.includes('repo')) text += ' - missing repo scope (private repos will fail)';
+            el.textContent = text;
+        }
+        async function loadTokenStatus() {
+            try { renderTokenStatus(await api('/api/settings')); }
+            catch (err) { document.getElementById('token-status').textContent = 'Error: ' + err.message; }
+        }
+        function showTokenMsg(msg, type) {
+            const div = document.getElementById('token-message');
+            div.innerHTML = '<div class="message ' + type + '">' + escapeHtml(msg) + '</div>';
+            setTimeout(() => { div.innerHTML = ''; }, 5000);
+        }
+        document.getElementById('token-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const input = document.getElementById('token-input');
+            const token = input.value.trim();
+            if (!token) return;
+            try {
+                const info = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ github_token: token }) });
+                input.value = '';
+                renderTokenStatus(info);
+                showTokenMsg('Saved. Used for the next repo list and reindex.', 'info');
+            } catch (err) { showTokenMsg(err.message, 'error'); }
+        });
+        document.getElementById('token-clear').addEventListener('click', async () => {
+            try { renderTokenStatus(await api('/api/settings', { method: 'DELETE' })); showTokenMsg('Cleared. Falling back to the env var.', 'info'); }
+            catch (err) { showTokenMsg(err.message, 'error'); }
+        });
 
         function showRepoMsg(msg, type) {
             const div = document.getElementById('repo-message');
