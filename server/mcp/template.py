@@ -35,122 +35,162 @@ _UI_TEMPLATE = """<!DOCTYPE html>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        /* Layered tokens (Atreia-style): bg < panel < panel2/3, line < line2, one accent + its rgb for tints.
+           A theme is one html[data-theme=x] block overriding these. Old names stay as aliases. */
         :root {
-            --bg: #111318;
-            --surface: #1c2030;
-            --border: #2d3248;
-            --text: #e2e8f0;
-            --text-muted: #8896a8;
-            --accent: #a78bfa;
-            --accent-hover: #c084fc;
-            --accent-dim: rgba(167, 139, 250, 0.12);
-            --accent-glow: rgba(167, 139, 250, 0.2);
-            --success: #34d399;
-            --error: #f87171;
+            --bg: #0f1116; --bg2: #13161d;
+            --panel: #181b24; --panel2: #1d2130; --panel3: #242a3b;
+            --line: #262b3b; --line2: #353c53;
+            --text: #e2e8f0; --muted: #8896a8; --dim: #5d6779;
+            --accent: #a78bfa; --accent2: #c4b5fd; --acc-rgb: 167,139,250;
+            --ok: #34d399; --err: #f87171; --err-rgb: 248,113,113;
+            --mono: 'SF Mono', 'Fira Code', Consolas, monospace;
+            --surface: var(--panel); --border: var(--line); --text-muted: var(--muted);
+            --accent-hover: var(--accent2); --accent-dim: rgba(var(--acc-rgb),.12); --accent-glow: rgba(var(--acc-rgb),.2);
+            --success: var(--ok); --error: var(--err);
         }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-            padding: 1.5rem 1rem;
-        }
-        .container { max-width: 900px; margin: 0 auto; }
-        .header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.5rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
-        .logo-svg { width: 28px; height: 28px; flex-shrink: 0; }
-        .header-text { flex: 1; }
-        .header-text h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; background: linear-gradient(135deg, #c084fc, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-        .header-text span { font-size: 0.75rem; color: var(--text-muted); }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; display: none; }
-        .status-dot.active { display: block; animation: pulse-dot 1.2s ease-in-out infinite; }
-        @keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.75); } }
-        .tabs { display: flex; gap: 0.25rem; margin-bottom: 1.5rem; background: var(--surface); padding: 0.25rem; border-radius: 8px; width: fit-content; }
-        .tab { background: transparent; border: none; color: var(--text-muted); padding: 0.4rem 1rem; cursor: pointer; border-radius: 6px; font-size: 0.8125rem; font-weight: 500; transition: all 0.15s; }
-        .tab:hover { color: var(--text); }
-        .tab.active { background: var(--accent-dim); color: var(--accent); box-shadow: inset 0 0 0 1px rgba(167,139,250,0.25); }
-        .panel { display: none; }
-        .panel.active { display: block; }
-        .search-form { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-        input[type="text"] { flex: 1; padding: 0.625rem 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.875rem; transition: border-color 0.15s; }
-        input[type="text"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
-        input[type="text"]::placeholder { color: var(--text-muted); }
-        select { padding: 0.5rem 0.75rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.8125rem; cursor: pointer; }
-        select:focus { outline: none; border-color: var(--accent); }
-        button { padding: 0.625rem 1.25rem; background: var(--accent); border: none; border-radius: 8px; color: #fff; cursor: pointer; font-size: 0.875rem; font-weight: 500; transition: all 0.15s; }
-        button:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 4px 12px var(--accent-glow); }
-        button:active { transform: translateY(0); }
-        button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
-        button.secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
-        button.secondary:hover { border-color: var(--accent); color: var(--accent); box-shadow: none; }
-        button.small { padding: 0.3rem 0.7rem; font-size: 0.75rem; }
-        button.danger { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--error); }
-        button.danger:hover { background: rgba(248,113,113,0.2); box-shadow: none; }
-        .toggles { display: flex; gap: 1.25rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; }
-        .toggle { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 1.25rem 1.5rem; font-size: 14px; }
+        .container { max-width: 1120px; margin: 0 auto; }
+        .ico { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
+
+        /* header: brand left, live stats + status right */
+        .header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; padding-bottom: 0.9rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+        .logo-svg { width: 26px; height: 26px; flex-shrink: 0; }
+        .header-text h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.01em; color: var(--accent2); line-height: 1.1; }
+        .header-text span { font-size: 0.72rem; color: var(--dim); }
+        .hstats { margin-left: auto; display: flex; align-items: center; gap: 1.1rem; font-size: 0.78rem; color: var(--muted); }
+        .hstat b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 0.25rem; }
+        .hdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); margin-right: 0.35rem; vertical-align: 1px; }
+        .hdot.ok { background: var(--ok); } .hdot.error { background: var(--err); }
+        .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: none; }
+        .status-dot.active { display: inline-block; animation: pulse-dot 1.2s ease-in-out infinite; }
+        #status-text { display: flex; align-items: center; gap: 0.4rem; }
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        .tabs { display: flex; gap: 0.2rem; margin-bottom: 1.25rem; background: var(--panel); border: 1px solid var(--line); padding: 0.2rem; border-radius: 9px; width: fit-content; }
+        .tab { display: flex; align-items: center; gap: 0.4rem; background: transparent; border: none; color: var(--muted); padding: 0.4rem 0.9rem; cursor: pointer; border-radius: 7px; font-size: 0.8125rem; font-weight: 500; }
+        .tab:hover { color: var(--text); background: rgba(var(--acc-rgb),.06); }
+        .tab.active { background: rgba(var(--acc-rgb),.14); color: var(--accent2); }
+        .panel { display: none; } .panel.active { display: block; }
+
+        /* inputs + buttons: flat, hover = accent tint, no lift/glow */
+        .search-form { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+        input[type="text"], input[type="password"], input:not([type]) { flex: 1; padding: 0.55rem 0.85rem; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; color: var(--text); font-size: 0.85rem; }
+        input:focus, select:focus { outline: none; border-color: rgba(var(--acc-rgb),.6); box-shadow: 0 0 0 3px rgba(var(--acc-rgb),.12); }
+        input::placeholder { color: var(--dim); }
+        select { padding: 0.45rem 0.7rem; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; color: var(--text); font-size: 0.8125rem; cursor: pointer; }
+        button { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; padding: 0.5rem 1rem; background: var(--accent); border: 1px solid transparent; border-radius: 8px; color: #16121f; cursor: pointer; font-size: 0.83rem; font-weight: 600; transition: background .12s, color .12s, border-color .12s; }
+        button:hover { background: var(--accent2); }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        button.secondary { background: var(--panel2); border-color: var(--line); color: var(--text); font-weight: 500; }
+        button.secondary:hover { background: rgba(var(--acc-rgb),.12); border-color: rgba(var(--acc-rgb),.35); color: var(--accent2); }
+        button.small { padding: 0.28rem 0.65rem; font-size: 0.75rem; }
+        button.danger { background: rgba(var(--err-rgb),.1); border-color: rgba(var(--err-rgb),.3); color: var(--err); }
+        button.danger:hover { background: rgba(var(--err-rgb),.2); }
+        /* icon button: quiet until hovered */
+        .ib { padding: 0; width: 28px; height: 28px; background: transparent; border: 1px solid transparent; color: var(--muted); border-radius: 7px; }
+        .ib:hover { background: rgba(var(--acc-rgb),.14); color: var(--accent2); border-color: transparent; }
+        .ib.del:hover { background: rgba(var(--err-rgb),.14); color: var(--err); }
+        .ib:disabled:hover { background: transparent; color: var(--muted); }
+
+        .toggles { display: flex; gap: 1.1rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; }
+        .toggle { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8125rem; color: var(--muted); cursor: pointer; }
         .toggle input { accent-color: var(--accent); }
-        .repo-filter-row { margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
-        .repo-filter-label { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
-        .results { display: flex; flex-direction: column; gap: 0.625rem; }
-        .result-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; transition: border-color 0.15s; }
-        .result-card:hover { border-color: rgba(167,139,250,0.3); }
+        .repo-filter-row { display: flex; align-items: center; gap: 0.5rem; }
+        .repo-filter-label { font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+        .results { display: flex; flex-direction: column; gap: 0.6rem; }
+        .result-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.85rem 1rem; }
+        .result-card:hover { border-color: var(--line2); }
         .result-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem; gap: 1rem; }
-        .result-title { font-weight: 600; font-size: 0.8125rem; color: var(--accent); word-break: break-all; line-height: 1.4; }
-        .result-meta { font-size: 0.7rem; color: var(--text-muted); text-align: right; white-space: nowrap; flex-shrink: 0; }
-        .result-content { font-size: 0.8rem; color: var(--text-muted); white-space: pre-wrap; max-height: 180px; overflow-y: auto; background: var(--bg); padding: 0.625rem 0.75rem; border-radius: 6px; font-family: 'SF Mono', 'Fira Code', Consolas, monospace; line-height: 1.5; }
+        .result-title { font-weight: 600; font-size: 0.8125rem; color: var(--accent2); word-break: break-all; line-height: 1.4; }
+        .result-meta { font-size: 0.7rem; color: var(--dim); text-align: right; white-space: nowrap; flex-shrink: 0; }
+        .result-content { font-size: 0.78rem; color: var(--muted); white-space: pre-wrap; max-height: 180px; overflow-y: auto; background: var(--bg2); padding: 0.6rem 0.75rem; border-radius: 6px; font-family: var(--mono); line-height: 1.5; }
         .result-tags { margin-top: 0.5rem; display: flex; gap: 0.25rem; flex-wrap: wrap; }
-        .tag { background: var(--accent-dim); border: 1px solid rgba(167,139,250,0.2); padding: 0.1rem 0.5rem; border-radius: 4px; font-size: 0.7rem; color: var(--accent); }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
-        .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; }
-        .stat-label { font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.375rem; text-transform: uppercase; letter-spacing: 0.05em; }
-        .stat-value { font-size: 1.75rem; font-weight: 700; }
-        .stat-value.ok { color: var(--success); }
-        .stat-value.error { color: var(--error); }
-        .section { margin-top: 1.5rem; }
-        .section-title { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem; }
-        .admin-tabs { display:flex; gap:0.2rem; margin-bottom:0; border-bottom:1px solid var(--border); overflow-x:auto; scrollbar-width:none; }
-        .admin-tabs::-webkit-scrollbar { display:none; }
-        .admin-tab { flex:0 0 auto; white-space:nowrap; background:transparent; border:none; border-bottom:2px solid transparent; color:var(--text-muted); padding:0.4rem 0.75rem; cursor:pointer; font-size:0.8rem; font-weight:500; transition:all 0.15s; margin-bottom:-1px; border-radius:0; }
-        .admin-tab:hover { color:var(--text); transform:none; box-shadow:none; background:transparent; }
-        .admin-tab.active { color:var(--accent); border-bottom-color:var(--accent); background:transparent; }
-        .admin-section { display:none; padding-top:1rem; }
-        .admin-section.active { display:block; }
-        .reindex-buttons { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
-        .status-log { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.875rem 1rem; font-family: 'SF Mono', 'Fira Code', Consolas, monospace; font-size: 0.75rem; max-height: 280px; overflow-y: auto; white-space: pre-wrap; color: var(--text-muted); line-height: 1.5; }
-        .status-running { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
-        .webhook-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
-        .webhook-table th { text-align: left; padding: 0.5rem 0.75rem; color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
-        .webhook-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(45,50,72,0.5); font-family: 'SF Mono', Consolas, monospace; }
+        .tag { background: rgba(var(--acc-rgb),.1); padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.7rem; color: var(--accent2); }
+        .section-title { font-size: 0.7rem; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 0.6rem; }
+
+        /* admin: left nav + content (desktop), scrolling tab row (narrow) */
+        .admin-layout { display: grid; grid-template-columns: 180px minmax(0,1fr); gap: 1.25rem; align-items: start; }
+        .admin-tabs { display: flex; flex-direction: column; gap: 0.15rem; position: sticky; top: 1rem; }
+        .admin-tab { justify-content: flex-start; background: transparent; border: none; color: var(--muted); padding: 0.45rem 0.7rem; font-size: 0.82rem; font-weight: 500; border-radius: 7px; white-space: nowrap; }
+        .admin-tab:hover { color: var(--text); background: rgba(var(--acc-rgb),.06); }
+        .admin-tab.active { color: var(--accent2); background: rgba(var(--acc-rgb),.14); }
+        .admin-layout > div { min-width: 0; }
+        .admin-section { display: none; } .admin-section.active { display: block; }
+        #reindex-log-wrap, #webhook-log-wrap, #admin-graph .card { overflow-x: auto; }
+        .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; margin-bottom: 0.9rem; }
+        .card-h { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
+        .card-h h3 { font-size: 0.88rem; font-weight: 600; }
+        .card-h .sub { font-size: 0.75rem; color: var(--dim); }
+        .card-h .push { margin-left: auto; display: flex; gap: 0.4rem; align-items: center; }
+        .hint { font-size: 0.76rem; color: var(--muted); line-height: 1.55; }
+        .hint code { font-family: var(--mono); font-size: 0.72rem; background: var(--bg2); padding: 0 0.25rem; border-radius: 3px; }
+        .reindex-buttons { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+        /* tools dropdown */
+        .dd { position: relative; }
+        .dd > summary { list-style: none; }
+        .dd > summary::-webkit-details-marker { display: none; }
+        .ddp { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 220px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 9px; padding: 0.3rem; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+        .ddi { display: flex; width: 100%; align-items: center; gap: 0.5rem; padding: 0.45rem 0.6rem; background: transparent; border: none; border-radius: 6px; color: var(--text); font-size: 0.8rem; font-weight: 400; cursor: pointer; justify-content: flex-start; }
+        .ddi:hover { background: rgba(var(--acc-rgb),.14); }
+        .ddi input { accent-color: var(--accent); }
+        .ddsep { height: 1px; background: var(--line); margin: 0.25rem 0.2rem; }
+        .status-log { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem 0.9rem; font-family: var(--mono); font-size: 0.72rem; max-height: 280px; overflow-y: auto; white-space: pre-wrap; color: var(--muted); line-height: 1.5; margin-top: 0.75rem; }
+        .status-running { border-color: rgba(var(--acc-rgb),.5); }
+        .webhook-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        .webhook-table th { text-align: left; padding: 0.45rem 0.6rem; color: var(--dim); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--line); }
+        .webhook-table td { padding: 0.45rem 0.6rem; border-bottom: 1px solid rgba(38,43,59,.6); font-family: var(--mono); font-size: 0.76rem; }
         .webhook-table tr:last-child td { border-bottom: none; }
-        .wh-triggered { color: var(--success); }
-        .wh-done { color: var(--text-muted); }
-        .wh-failed { color: #f87171; }
-        .wh-skipped { color: var(--text-muted); }
-        .repo-item { display: flex; justify-content: space-between; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.625rem 0.875rem; margin-bottom: 0.4rem; transition: border-color 0.15s; }
-        .repo-item:hover { border-color: rgba(167,139,250,0.25); }
-        .repo-item.indexed { border-color: rgba(167,139,250,0.2); }
-        .repo-info { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1; }
-        .repo-info { flex-wrap: wrap; }
+        .wh-triggered { color: var(--ok); } .wh-done { color: var(--muted); } .wh-failed { color: var(--err); } .wh-skipped { color: var(--dim); }
+
+        /* repos: one quiet row each, actions are icons */
+        .repo-item { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 0.5rem 0.5rem 0.85rem; margin-bottom: 0.35rem; }
+        .repo-item:hover { border-color: var(--line2); }
+        .repo-item.untracked { background: transparent; border-style: dashed; }
+        .repo-item.untracked .repo-name { color: var(--muted); }
+        .repo-info { display: flex; align-items: center; gap: 0.6rem; min-width: 0; flex: 1; flex-wrap: wrap; }
         .repo-error { flex-basis: 100%; min-width: 0; font-size: 0.72rem; line-height: 1.4; color: #fecdd3; white-space: normal; overflow-wrap: anywhere; }
-        .repo-error .repo-badge { background: #3b1d2a; color: #fecdd3; border-color: #be123c; margin-right: 0.4rem; }
-        .repo-name { font-size: 0.8125rem; font-family: 'SF Mono', Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .repo-error .repo-badge { background: rgba(var(--err-rgb),.15); color: #fecdd3; margin-right: 0.4rem; }
+        .repo-name { font-size: 0.8125rem; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
         .repo-meta { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; }
-        .repo-badge { font-size: 0.65rem; background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(167,139,250,0.3); padding: 0.1rem 0.4rem; border-radius: 4px; }
-        .repo-age { font-size: 0.7rem; color: var(--text-muted); }
-        .repo-actions { display: flex; gap: 0.4rem; flex-shrink: 0; margin-left: 0.75rem; }
-        .message { padding: 0.625rem 0.875rem; border-radius: 8px; margin-bottom: 0.75rem; font-size: 0.8125rem; }
-        .message.error { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.2); color: var(--error); }
-        .message.info { background: var(--accent-dim); border: 1px solid rgba(167,139,250,0.2); color: var(--accent); }
-        .empty { color: var(--text-muted); font-style: italic; padding: 0.5rem 0; }
+        .repo-badge { font-size: 0.66rem; background: rgba(var(--acc-rgb),.12); color: var(--accent2); padding: 0.08rem 0.4rem; border-radius: 4px; }
+        .repo-age { font-size: 0.7rem; color: var(--dim); }
+        .repo-actions { display: flex; gap: 0.15rem; flex-shrink: 0; }
+        .message { padding: 0.55rem 0.85rem; border-radius: 8px; margin-bottom: 0.75rem; font-size: 0.8125rem; }
+        .message.error { background: rgba(var(--err-rgb),.1); border: 1px solid rgba(var(--err-rgb),.2); color: var(--err); }
+        .message.info { background: rgba(var(--acc-rgb),.1); border: 1px solid rgba(var(--acc-rgb),.2); color: var(--accent2); }
+        .empty { color: var(--dim); font-style: italic; padding: 0.5rem 0; }
         .loading { opacity: 0.5; }
-        a { color: var(--accent); text-decoration: none; }
+        a { color: var(--accent2); text-decoration: none; }
         a:hover { text-decoration: underline; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+        ::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 3px; }
+
+        @media (max-width: 720px) {
+            body { padding: 1rem 0.85rem; }
+            .hstats { margin-left: 0; width: 100%; gap: 0.9rem; flex-wrap: wrap; }
+            .tabs { width: 100%; } .tab { flex: 1; justify-content: center; padding: 0.45rem 0.4rem; }
+            .admin-layout { grid-template-columns: minmax(0,1fr); gap: 0.75rem; }
+            .admin-tabs { flex-direction: row; overflow-x: auto; scrollbar-width: none; position: static; border-bottom: 1px solid var(--line); padding-bottom: 0.35rem; }
+            .admin-tabs::-webkit-scrollbar { display: none; }
+            .admin-tab { flex: 0 0 auto; }
+        }
     </style>
 </head>
 <body>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+        <symbol id="i-repos" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+        <symbol id="i-admin" viewBox="0 0 24 24"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></symbol>
+        <symbol id="i-graph" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+        <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+        <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+        <symbol id="i-eraser" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L11 21M22 21H7M5 11l9 9"/></symbol>
+    </svg>
     <div class="container">
         <div class="header">
             __LOGO__
@@ -158,106 +198,120 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <h1>Cortex</h1>
                 <span>RAG Dashboard</span>
             </div>
-            <span id="status-dot" class="status-dot" title="Reindexing..."></span>
+            <div class="hstats">
+                <span class="hstat"><b id="stat-notes">-</b>notes</span>
+                <span class="hstat"><b id="stat-code">-</b>code chunks</span>
+                <span class="hstat"><span class="hdot" id="stat-ollama"></span>Ollama</span>
+                <span class="hstat" id="status-text"><span id="status-dot" class="status-dot"></span><span id="status-label">idle</span></span>
+            </div>
         </div>
 
         <div class="tabs">
-            <button class="tab active" data-tab="search">Search</button>
-            <button class="tab" data-tab="repos">Repos</button>
-            <button class="tab" data-tab="admin">Admin</button>
-            <button class="tab" data-tab="graph">Graph</button>
+            <button class="tab active" data-tab="search"><svg class="ico"><use href="#i-search"/></svg>Search</button>
+            <button class="tab" data-tab="repos"><svg class="ico"><use href="#i-repos"/></svg>Repos</button>
+            <button class="tab" data-tab="admin"><svg class="ico"><use href="#i-admin"/></svg>Admin</button>
+            <button class="tab" data-tab="graph"><svg class="ico"><use href="#i-graph"/></svg>Graph</button>
         </div>
 
         <div id="search-panel" class="panel active">
             <form class="search-form" id="search-form">
                 <input type="text" id="query" placeholder="Search notes and code..." autofocus>
-                <button type="submit">Search</button>
+                <button type="submit"><svg class="ico"><use href="#i-search"/></svg>Search</button>
             </form>
             <div class="toggles">
                 <label class="toggle"><input type="checkbox" id="search-notes" checked><span>Notes</span></label>
                 <label class="toggle"><input type="checkbox" id="search-code" checked><span>Code</span></label>
-            </div>
-            <div class="repo-filter-row" id="repo-filter-row" style="display:none">
-                <span class="repo-filter-label">Repo:</span>
-                <select id="repo-filter"><option value="">All repos</option></select>
+                <div class="repo-filter-row" id="repo-filter-row" style="display:none">
+                    <span class="repo-filter-label">in</span>
+                    <select id="repo-filter"><option value="">All repos</option></select>
+                </div>
             </div>
             <div id="search-results" class="results"></div>
         </div>
 
         <div id="repos-panel" class="panel">
-            <form id="repo-add-form" style="display:flex;gap:0.5rem;margin-bottom:0.75rem">
-                <input id="repo-add-input" placeholder="owner/name (e.g. someone/their-repo)" autocomplete="off" style="flex:1">
-                <button type="submit">Add repo</button>
+            <form id="repo-add-form" class="search-form">
+                <input id="repo-add-input" placeholder="owner/name (e.g. someone/their-repo)" autocomplete="off">
+                <button type="submit"><svg class="ico"><use href="#i-plus"/></svg>Add repo</button>
             </form>
-            <div id="repo-gh-warning" style="display:none;font-size:0.8rem;color:var(--text-muted);margin-bottom:0.5rem"></div>
+            <div id="repo-gh-warning" class="hint" style="display:none;margin-bottom:0.5rem"></div>
+            <div id="repo-message"></div>
             <div id="repo-list"></div>
-            <div id="repo-message" style="margin-top:0.75rem"></div>
         </div>
 
         <div id="admin-panel" class="panel">
-            <div class="stats-grid">
-                <div class="stat-card"><div class="stat-label">Notes indexed</div><div class="stat-value" id="stat-notes">-</div></div>
-                <div class="stat-card"><div class="stat-label">Code chunks</div><div class="stat-value" id="stat-code">-</div></div>
-                <div class="stat-card"><div class="stat-label">Ollama</div><div class="stat-value" id="stat-ollama">-</div></div>
-            </div>
-            <div class="admin-tabs">
+          <div class="admin-layout">
+            <nav class="admin-tabs">
                 <button class="admin-tab active" data-admin-tab="reindex">Reindex</button>
-                <button class="admin-tab" data-admin-tab="graph">Graph Efficiency</button>
+                <button class="admin-tab" data-admin-tab="graph">Graph efficiency</button>
                 <button class="admin-tab" data-admin-tab="webhooks">Webhooks</button>
                 <button class="admin-tab" data-admin-tab="logs">Logs</button>
                 <button class="admin-tab" data-admin-tab="settings">Settings</button>
-            </div>
+            </nav>
+            <div>
             <div id="admin-reindex" class="admin-section active">
-                <div class="reindex-buttons">
-                    <button id="reindex-all">Reindex All</button>
-                    <button id="reindex-notes" class="secondary">Notes Only</button>
-                    <button id="reindex-code" class="secondary">Code Only</button>
+                <div class="card">
+                    <div class="card-h"><h3>Reindex</h3><span class="sub">notes from the vault, code from tracked repos</span></div>
+                    <div class="reindex-buttons">
+                        <button id="reindex-all"><svg class="ico"><use href="#i-refresh"/></svg>Reindex all</button>
+                        <button id="reindex-notes" class="secondary">Notes</button>
+                        <button id="reindex-code" class="secondary">Code</button>
+                        <details class="dd" id="reindex-tools" style="margin-left:auto">
+                            <summary class="ib" title="More"><svg class="ico"><use href="#i-more"/></svg></summary>
+                            <div class="ddp">
+                                <label class="ddi"><input type="checkbox" id="force-reindex"><svg class="ico"><use href="#i-zap"/></svg>Force re-embed (clear cache first)</label>
+                                <div class="ddsep"></div>
+                                <button type="button" class="ddi" id="clear-cache-btn"><svg class="ico"><use href="#i-eraser"/></svg>Clear cache only</button>
+                            </div>
+                        </details>
+                    </div>
+                    <div id="queue-list" class="hint" style="display:none;margin-top:0.6rem"></div>
+                    <div id="reindex-status" class="status-log">No reindex running.</div>
                 </div>
-                <div style="margin:0.5rem 0 0.75rem;display:flex;align-items:center;gap:0.75rem">
-                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;color:var(--text-muted);cursor:pointer">
-                        <input type="checkbox" id="force-reindex" style="cursor:pointer">
-                        Force re-embed (clear cache)
-                    </label>
-                    <button id="clear-cache-btn" class="secondary" style="font-size:0.8rem;padding:0.25rem 0.6rem;color:var(--text-muted)">Clear Cache Only</button>
-                </div>
-                <div id="queue-list" style="display:none;font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem;padding:0.3rem 0.5rem;background:var(--accent-dim);border-radius:4px"></div>
-                <div id="reindex-status" class="status-log">No reindex running.</div>
-                <div style="margin-top:1.25rem"><div class="section-title">Job History</div><div id="reindex-log-wrap"><div class="empty">No jobs run yet.</div></div></div>
+                <div class="card"><div class="card-h"><h3>Job history</h3></div><div id="reindex-log-wrap"><div class="empty">No jobs run yet.</div></div></div>
             </div>
             <div id="admin-graph" class="admin-section">
-                <table class="webhook-table"><tbody id="graph-stats-body"><tr><td colspan="2" class="empty">Click Graph Efficiency to load.</td></tr></tbody></table>
-                <div style="margin-top:0.5rem;text-align:right"><button id="history-btn" style="display:none;background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:0.3rem 0.75rem;font-size:0.8rem;cursor:pointer">Show past versions</button></div>
+                <div class="card">
+                    <div class="card-h"><h3>Graph efficiency</h3><span class="sub">search + cache counters since start</span><span class="push"><button id="history-btn" class="secondary small" style="display:none">Past versions</button></span></div>
+                    <table class="webhook-table"><tbody id="graph-stats-body"><tr><td colspan="2" class="empty">Loading...</td></tr></tbody></table>
+                </div>
             </div>
             <div id="admin-webhooks" class="admin-section">
-                <div id="webhook-log-wrap"><div class="empty">No webhooks received yet.</div></div>
+                <div class="card"><div class="card-h"><h3>Webhooks</h3><span class="sub">GitHub pushes that triggered a reindex</span></div><div id="webhook-log-wrap"><div class="empty">No webhooks received yet.</div></div></div>
             </div>
             <div id="admin-settings" class="admin-section">
-                <div class="section-title">GitHub token</div>
-                <div id="token-status" style="font-size:0.85rem;margin-bottom:0.75rem;color:var(--text-muted)">Loading...</div>
-                <form id="token-form" style="display:flex;gap:0.5rem;flex-wrap:wrap">
-                    <input id="token-input" type="password" placeholder="ghp_... or github_pat_..." autocomplete="off" style="flex:1;min-width:220px">
-                    <button type="submit">Save</button>
-                    <button type="button" id="token-clear" class="secondary">Clear (use env var)</button>
-                </form>
-                <div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.6rem;line-height:1.5">
-                    Used to list repos and clone/pull private repos. Checked against GitHub before saving; stored in <code>data/settings.json</code> (mode 600), overrides the <code>GITHUB_TOKEN</code> env var.<br>
-                    Private repos owned by <b>someone else</b> (you are a collaborator) need a <b>classic</b> PAT with <code>repo</code> scope; fine-grained PATs can't see them.
+                <div class="card">
+                    <div class="card-h"><h3>GitHub token</h3><span class="sub">lists repos, clones private ones</span></div>
+                    <div id="token-status" style="font-size:0.82rem;margin-bottom:0.75rem;color:var(--muted)">Loading...</div>
+                    <form id="token-form" style="display:flex;gap:0.5rem;flex-wrap:wrap">
+                        <input id="token-input" type="password" placeholder="ghp_... or github_pat_..." autocomplete="off" style="flex:1;min-width:220px">
+                        <button type="submit">Save</button>
+                        <button type="button" id="token-clear" class="secondary">Clear (use env var)</button>
+                    </form>
+                    <div id="token-message" style="margin-top:0.6rem"></div>
+                    <div class="hint" style="margin-top:0.6rem">
+                        Checked against GitHub before saving; stored in <code>data/settings.json</code> (mode 600), overrides the <code>GITHUB_TOKEN</code> env var.<br>
+                        Private repos owned by <b>someone else</b> (you are a collaborator) need a <b>classic</b> PAT with <code>repo</code> scope; fine-grained PATs can't see them.
+                    </div>
                 </div>
-                <div id="token-message" style="margin-top:0.6rem"></div>
             </div>
             <div id="admin-logs" class="admin-section">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem"><span style="font-size:0.75rem;color:var(--text-muted)">Last 200 lines</span><div style="display:flex;gap:0.5rem;align-items:center"><label style="font-size:0.75rem;color:var(--text-muted);cursor:pointer"><input type="checkbox" id="log-tail-toggle" style="margin-right:0.25rem">tail</label><button onclick="loadLogs()" class="secondary" style="padding:0.2rem 0.6rem;font-size:0.75rem">Refresh</button></div></div>
-                <pre id="log-output" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem;font-size:0.7rem;max-height:300px;overflow-y:auto;color:var(--text-muted);white-space:pre-wrap;word-break:break-all">No logs loaded.</pre>
+                <div class="card">
+                    <div class="card-h"><h3>Server log</h3><span class="sub">last 200 lines</span><span class="push"><label class="toggle"><input type="checkbox" id="log-tail-toggle">follow</label><button onclick="loadLogs()" class="ib" title="Refresh"><svg class="ico"><use href="#i-refresh"/></svg></button></span></div>
+                    <pre id="log-output" class="status-log" style="max-height:420px;margin-top:0;word-break:break-all">No logs loaded.</pre>
+                </div>
             </div>
+            </div>
+          </div>
         </div>
 
         <div id="graph-panel" class="panel">
             <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;align-items:center">
                 <select id="graph-repo-select" style="flex:1"><option value="notes">Notes (wikilinks)</option><option value="global">★ Global (cross-repo)</option></select>
-                <button id="graph-load-btn" class="secondary" style="flex-shrink:0">Load Graph</button>
+                <button id="graph-load-btn" class="secondary" style="flex-shrink:0">Load graph</button>
             </div>
             <div id="graph-info" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;min-height:1.2em"></div>
-            <div id="graph-container" style="width:100%;height:520px;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;position:relative">
+            <div id="graph-container" style="width:100%;height:min(640px,70vh);background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;position:relative">
                 <svg id="graph-svg" style="width:100%;height:100%"></svg>
                 <div id="graph-placeholder" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.875rem;pointer-events:none">Select a repo and click Load Graph</div>
             </div>
@@ -444,7 +498,11 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         });
 
         const statusDot = document.getElementById('status-dot');
-        async function pollStatusDot() { try { const data = await api('/api/status'); statusDot.classList.toggle('active', !!data.running); if ((data.running || (data.queue && data.queue.length)) && !statusPoll) pollStatus(); } catch (_) {} }
+        function setStatusLabel(data) {
+            const q = (data.queue || []).length;
+            document.getElementById('status-label').textContent = data.running ? ('indexing ' + jobLabel(data.current_job) + (q ? ' +' + q + ' queued' : '')) : (q ? q + ' queued' : 'idle');
+        }
+        async function pollStatusDot() { try { const data = await api('/api/status'); statusDot.classList.toggle('active', !!data.running); setStatusLabel(data); if ((data.running || (data.queue && data.queue.length)) && !statusPoll) pollStatus(); } catch (_) {} }
         pollStatusDot();
         setInterval(pollStatusDot, 5000);
 
@@ -466,6 +524,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             } catch (_) {}
         }
         loadRepoFilter();
+        loadStats();
 
         searchForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -505,8 +564,8 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 document.getElementById('stat-notes').textContent = data.notes?.points_count?.toLocaleString() ?? '-';
                 document.getElementById('stat-code').textContent = data.code?.points_count?.toLocaleString() ?? '-';
                 const ollama = document.getElementById('stat-ollama');
-                ollama.textContent = data.ollama?.status === 'ok' ? '✓' : '✗';
-                ollama.className = 'stat-value ' + (data.ollama?.status === 'ok' ? 'ok' : 'error');
+                ollama.className = 'hdot ' + (data.ollama?.status === 'ok' ? 'ok' : 'error');
+                ollama.parentElement.title = 'Ollama ' + (data.ollama?.status || 'unknown');
                 if (data.graph) {
                     const g = data.graph;
                     const avgLift = g.centrality_lift_count > 0 ? (g.centrality_lift_total / g.centrality_lift_count).toFixed(4) : '—';
@@ -583,26 +642,26 @@ _UI_TEMPLATE = """<!DOCTYPE html>
 
         async function triggerReindex(notes, code, repo, btn) {
             const force = document.getElementById('force-reindex').checked;
-            if (btn) { btn.disabled = true; btn._origText = btn.textContent; btn.textContent += force ? ' (force queued)' : ' (queued)'; }
+            if (btn) { btn.disabled = true; btn._origHtml = btn.innerHTML; btn.lastChild.textContent += force ? ' (force queued)' : ' (queued)'; }
             try {
                 await api('/api/reindex', { method: 'POST', body: JSON.stringify({ notes, code, repo: repo || '', force }) });
                 pollStatus();
             } catch (err) {
                 document.getElementById('reindex-status').textContent = 'Error: ' + err.message;
-                if (btn) { btn.disabled = false; btn.textContent = btn._origText; }
+                if (btn) { btn.disabled = false; btn.innerHTML = btn._origHtml; }
             }
         }
 
         document.getElementById('clear-cache-btn').addEventListener('click', async function() {
             const btn = this;
-            btn.disabled = true; btn._origText = btn.textContent; btn.textContent = 'Clearing...';
+            btn.disabled = true; document.getElementById('reindex-tools').open = false;
             try {
                 const data = await api('/api/clear-cache', { method: 'POST', body: JSON.stringify({ all_workspaces: false }) });
                 document.getElementById('reindex-status').textContent = `Cache cleared (${data.deleted} file(s) deleted). Run reindex to rebuild.`;
             } catch (err) {
                 document.getElementById('reindex-status').textContent = 'Error: ' + err.message;
             } finally {
-                btn.disabled = false; btn.textContent = btn._origText;
+                btn.disabled = false;
             }
         });
 
@@ -631,7 +690,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             const activeJobs = [...(currentJob ? [currentJob] : []), ...(queue || [])];
             const notesActive = activeJobs.some(j => j.notes);
             const codeActive = activeJobs.some(j => j.code);
-            [all, notes, code].forEach(b => { b.disabled = false; if (b._origText) { b.textContent = b._origText; delete b._origText; } });
+            [all, notes, code].forEach(b => { b.disabled = false; if (b._origHtml) { b.innerHTML = b._origHtml; delete b._origHtml; } });
             if (notesActive && codeActive) { all.disabled = true; }
             if (notesActive) { notes.disabled = true; }
             if (codeActive) { code.disabled = true; }
@@ -650,6 +709,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     statusDiv.textContent = text;
                     statusDiv.scrollTop = statusDiv.scrollHeight;
                     statusDot.classList.toggle('active', !!data.running);
+                    setStatusLabel(data);
                     updateQueueDisplay(data.current_job, data.queue);
                     syncButtonStates(data.current_job, data.queue);
                     if (data.done && !data.running && !(data.queue && data.queue.length)) {
@@ -702,11 +762,15 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 const age = hasIndexedAt ? timeAgo(indexedAt[name]) : '';
                 const err = isTracked ? errors[name] : '';
                 const errHtml = err ? '<div class="repo-error" title="' + escapeHtml(err) + '"><span class="repo-badge">index failed</span>' + escapeHtml(err.slice(0, 300)) + '</div>' : '';
-                return '<div class="repo-item' + (hasIndexedAt ? ' indexed' : '') + '" data-repo="' + escapeHtml(repo) + '"><div class="repo-info"><span class="repo-name">' + escapeHtml(repo) + '</span>' + (hasIndexedAt ? '<div class="repo-meta"><span class="repo-badge">indexed</span><span class="repo-age">' + escapeHtml(age) + '</span></div>' : '') + errHtml + '</div><div class="repo-actions">' + (isTracked ? '<button class="secondary small repo-reindex-btn">Reindex</button><button class="danger small repo-remove-btn">Remove</button>' : '<button class="secondary small repo-add-btn">Add to index</button>') + '</div></div>';
+                const ic = n => '<svg class="ico"><use href="#i-' + n + '"/></svg>';
+                const actions = isTracked
+                    ? '<button class="ib repo-reindex-btn" title="Reindex ' + escapeHtml(name) + '">' + ic('refresh') + '</button><button class="ib del repo-remove-btn" title="Remove ' + escapeHtml(name) + ' from the index">' + ic('trash') + '</button>'
+                    : '<button class="ib repo-add-btn" title="Add ' + escapeHtml(name) + ' to the index">' + ic('plus') + '</button>';
+                return '<div class="repo-item' + (isTracked ? '' : ' untracked') + '" data-repo="' + escapeHtml(repo) + '"><div class="repo-info"><span class="repo-name">' + escapeHtml(repo) + '</span>' + (hasIndexedAt ? '<div class="repo-meta"><span class="repo-badge">indexed</span><span class="repo-age">' + escapeHtml(age) + '</span></div>' : '') + errHtml + '</div><div class="repo-actions">' + actions + '</div></div>';
             }).join('');
-            listDiv.querySelectorAll('.repo-reindex-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; const name = repo.split('/')[1]; btn.disabled = true; btn.textContent = '...'; try { await triggerReindex(false, true, name); showRepoMsg('Reindexing ' + name + '...', 'info'); } catch (err) { showRepoMsg(err.message, 'error'); } finally { btn.disabled = false; btn.textContent = 'Reindex'; } }); });
-            listDiv.querySelectorAll('.repo-remove-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; try { const data = await api('/api/repos/' + encodeURIComponent(repo), { method: 'DELETE' }); renderRepos(allRepos, data.repos || [], indexedAt, errors); showRepoMsg('Removed ' + repo.split('/')[1] + ' from index', 'info'); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); } }); });
-            listDiv.querySelectorAll('.repo-add-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; btn.disabled = true; btn.textContent = '...'; try { const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo }) }); renderRepos(allRepos, data.repos || [], indexedAt, errors); const name = repo.split('/')[1]; showRepoMsg('Added ' + name + ' — indexing...', 'info'); await triggerReindex(false, true, name); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); btn.disabled = false; btn.textContent = 'Add to index'; } }); });
+            listDiv.querySelectorAll('.repo-reindex-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; const name = repo.split('/')[1]; btn.disabled = true; try { await triggerReindex(false, true, name); showRepoMsg('Reindexing ' + name + '...', 'info'); } catch (err) { showRepoMsg(err.message, 'error'); } finally { btn.disabled = false; } }); });
+            listDiv.querySelectorAll('.repo-remove-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; if (!confirm('Stop tracking ' + repo + '?')) return; try { const data = await api('/api/repos/' + encodeURIComponent(repo), { method: 'DELETE' }); renderRepos(allRepos, data.repos || [], indexedAt, errors); showRepoMsg('Removed ' + repo.split('/')[1] + ' from index', 'info'); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); } }); });
+            listDiv.querySelectorAll('.repo-add-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; btn.disabled = true; try { const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo }) }); renderRepos(allRepos, data.repos || [], indexedAt, errors); const name = repo.split('/')[1]; showRepoMsg('Added ' + name + ' — indexing...', 'info'); await triggerReindex(false, true, name); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); btn.disabled = false; } }); });
         }
 
         document.getElementById('repo-add-form').addEventListener('submit', async (e) => {
