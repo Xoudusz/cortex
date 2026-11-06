@@ -253,12 +253,19 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             return btoa(String.fromCharCode(...arr)).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');
         }
 
+        // Auth (issue #8): initAuth() is the single entry point. Every api() call awaits
+        // authReady, so no request runs (and no 401 can restart OAuth) while a ?code=
+        // exchange is still in flight. startOAuthFlow() runs at most once per page and
+        // stores the verifier together with the challenge it navigates with.
+        let oauthStarted = false;
         function startOAuthFlow() {
+            if (oauthStarted) return;
+            oauthStarted = true;
             const verifier = generateVerifier();
-            localStorage.setItem('cortex_pkce_verifier', verifier);
             crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)).then(hash => {
                 const challenge = btoa(String.fromCharCode(...new Uint8Array(hash)))
                     .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');
+                localStorage.setItem('cortex_pkce_verifier', verifier);
                 const redirectUri = window.location.origin + '/';
                 const params = new URLSearchParams({
                     response_type: 'code',
@@ -271,45 +278,105 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             });
         }
 
-        (async function initAuth() {
-            const params = new URLSearchParams(window.location.search);
-            const code = params.get('code');
-            if (code) {
-                const verifier = localStorage.getItem('cortex_pkce_verifier');
-                if (verifier) {
+        function showAuthError(message) {
+            const box = document.createElement('div');
+            box.id = 'auth-error';
+            box.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:1000;padding:12px 16px;border-radius:8px;background:#3b1d2a;color:#fecdd3;border:1px solid #be123c;font:14px system-ui;max-width:90vw';
+            box.textContent = 'Sign-in failed: ' + message + ' ';
+            const retry = document.createElement('button');
+            retry.textContent = 'Sign in again';
+            retry.style.cssText = 'margin-left:8px;cursor:pointer';
+            retry.onclick = () => { oauthStarted = false; startOAuthFlow(); };
+            box.appendChild(retry);
+            document.body.appendChild(box);
+        }
+
+        function saveTokens(data) {
+            localStorage.setItem('cortex_token', data.access_token);
+            if (data.refresh_token) localStorage.setItem('cortex_refresh', data.refresh_token);
+        }
+
+        // Single-flight refresh: concurrent 401s share one POST /token.
+        let refreshing = null;
+        function refreshAccessToken() {
+            const rt = localStorage.getItem('cortex_refresh');
+            if (!rt) return Promise.resolve(false);
+            if (!refreshing) {
+                refreshing = (async () => {
                     try {
                         const res = await fetch('/token', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                            body: new URLSearchParams({
-                                grant_type: 'authorization_code',
-                                code,
-                                code_verifier: verifier,
-                                client_id: 'cortex-web-ui',
-                                redirect_uri: window.location.origin + '/',
-                            }),
+                            body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: rt, client_id: 'cortex-web-ui' }),
                         });
-                        if (res.ok) {
-                            const data = await res.json();
-                            localStorage.setItem('cortex_token', data.access_token);
-                            if (data.refresh_token) localStorage.setItem('cortex_refresh', data.refresh_token);
-                            localStorage.removeItem('cortex_pkce_verifier');
-                        }
-                    } catch (_) {}
-                }
-                history.replaceState({}, '', '/');
-                window.location.reload();
-                return;
+                        if (!res.ok) { localStorage.removeItem('cortex_refresh'); return false; }
+                        saveTokens(await res.json());
+                        return true;
+                    } catch (_) {
+                        return false;
+                    } finally {
+                        setTimeout(() => { refreshing = null; }, 0);
+                    }
+                })();
             }
-            if (!getToken()) startOAuthFlow();
+            return refreshing;
+        }
+
+        const authReady = (async function initAuth() {
+            const params = new URLSearchParams(window.location.search);
+            const code = params.get('code');
+            if (code) {
+                history.replaceState({}, '', '/');
+                const verifier = localStorage.getItem('cortex_pkce_verifier');
+                localStorage.removeItem('cortex_pkce_verifier');
+                if (!verifier) { showAuthError('no PKCE verifier in this browser (opened in another tab?).'); return false; }
+                try {
+                    const res = await fetch('/token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            grant_type: 'authorization_code',
+                            code,
+                            code_verifier: verifier,
+                            client_id: 'cortex-web-ui',
+                            redirect_uri: window.location.origin + '/',
+                        }),
+                    });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        showAuthError(err.error_description || err.error || ('HTTP ' + res.status));
+                        return false;
+                    }
+                    saveTokens(await res.json());
+                    return true;
+                } catch (e) {
+                    showAuthError(e.message || 'network error');
+                    return false;
+                }
+            }
+            if (getToken()) return true;
+            if (await refreshAccessToken()) return true;
+            startOAuthFlow();
+            return false;
         })();
 
-        async function api(path, options = {}) {
+        async function api(path, options = {}, retried = false) {
+            await authReady;
             const token = getToken();
             const headers = { 'Content-Type': 'application/json', ...options.headers };
             if (token) headers['Authorization'] = 'Bearer ' + token;
             const res = await fetch(path, { ...options, headers });
-            if (res.status === 401) { localStorage.removeItem('cortex_token'); startOAuthFlow(); return; }
+            if (res.status === 401) {
+                // Only drop the token this request used: a newer one may have been stored meanwhile.
+                if (token && getToken() === token) localStorage.removeItem('cortex_token');
+                if (!retried) {
+                    const current = getToken();
+                    if (current && current !== token) return api(path, options, true);
+                    if (await refreshAccessToken()) return api(path, options, true);
+                }
+                startOAuthFlow();
+                return;
+            }
             if (!res.ok) { const err = await res.json().catch(() => ({ error: res.statusText })); throw new Error(err.error || res.statusText); }
             return res.json();
         }
@@ -353,10 +420,8 @@ _UI_TEMPLATE = """<!DOCTYPE html>
 
         const statusDot = document.getElementById('status-dot');
         async function pollStatusDot() { try { const data = await api('/api/status'); statusDot.classList.toggle('active', !!data.running); if ((data.running || (data.queue && data.queue.length)) && !statusPoll) pollStatus(); } catch (_) {} }
-        if (!new URLSearchParams(window.location.search).get('code')) {
-            pollStatusDot();
-            setInterval(pollStatusDot, 5000);
-        }
+        pollStatusDot();
+        setInterval(pollStatusDot, 5000);
 
         const searchForm = document.getElementById('search-form');
         const queryInput = document.getElementById('query');

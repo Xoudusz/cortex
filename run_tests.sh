@@ -28,6 +28,10 @@ echo "=== tests/test_windows_local.py ==="
 $PYTHON tests/test_windows_local.py
 
 echo ""
+echo "=== tests/test_server_indexer.py ==="
+$PYTHON tests/test_server_indexer.py
+
+echo ""
 echo "=== tests/test_incremental.py (real embeddings) ==="
 $PYTHON tests/test_incremental.py
 
