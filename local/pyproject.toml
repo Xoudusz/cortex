@@ -22,6 +22,7 @@ dependencies = [
     "tree-sitter-typescript",
     "tree-sitter-kotlin",
     "tree-sitter-c-sharp",
+    "tree-sitter-gdscript",
 ]
 
 [project.scripts]

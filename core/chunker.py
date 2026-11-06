@@ -6,6 +6,11 @@ import os
 import re as _re
 from pathlib import Path
 
+try:
+    from . import godot as _godot
+except ImportError:  # server: core/ is on sys.path as top-level modules
+    import godot as _godot
+
 _RAZOR_BLOCK_RE = _re.compile(r'@(?:code|functions)\s*\{', _re.IGNORECASE)
 
 
@@ -32,7 +37,8 @@ def _extract_razor_cs_blocks(source: str) -> list:
 
 REPOS_DIR = Path(os.environ.get("REPOS_DIR", "/tmp/repos"))
 
-CODE_EXTS = {".js", ".ts", ".tsx", ".jsx", ".svelte", ".py", ".java", ".go", ".rs", ".css", ".html", ".kt", ".kts", ".gd", ".yml", ".yaml", ".cs", ".razor", ".cshtml"}
+CODE_EXTS = {".js", ".ts", ".tsx", ".jsx", ".svelte", ".py", ".java", ".go", ".rs", ".css", ".html", ".kt", ".kts", ".gd", ".yml", ".yaml", ".cs", ".razor", ".cshtml",
+             ".tscn", ".tres", ".godot", ".gdshader", ".dialogue"}
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", ".svelte-kit", "__pycache__", ".gradle", "target", "bin", "obj", ".godot"}
 LANG_MAP = {
     ".js": "javascript", ".ts": "typescript", ".tsx": "typescript",
@@ -41,6 +47,8 @@ LANG_MAP = {
     ".kt": "kotlin", ".kts": "kotlin", ".gd": "gdscript",
     ".yml": "yaml", ".yaml": "yaml", ".cs": "csharp",
     ".razor": "razor", ".cshtml": "cshtml",
+    ".tscn": "godot-scene", ".tres": "godot-resource", ".godot": "godot-project",
+    ".gdshader": "gdshader", ".dialogue": "dialogue",
 }
 
 def _is_excluded(rel: str, patterns: list) -> bool:
@@ -297,6 +305,8 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
         rel = path.name
     language = LANG_MAP.get(ext, ext.lstrip("."))
     extra = _extra_tokens(rel, lines)
+    if ext == ".gd":
+        extra = (extra + " " + _godot.gd_context(source_text)).strip()
 
     def _header(rel: str, s: int, e: int, tokens: str) -> str:
         h = f"# {repo_name}/{rel} (lines {s}-{e})\n# {tokens}"
@@ -330,6 +340,29 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
                 "github_url": url,
             })
         return chunks
+
+    # Godot scenes/resources/project: index a readable summary, not the raw serialization
+    if ext in _godot.GODOT_SUMMARY_EXTS:
+        summary = _godot.summarize(path, source_text).splitlines()
+        if not summary:
+            return []
+        tokens = _path_tokens(repo_name, rel)
+        n_file = len(lines)
+        windows = [summary[i:i + MAX_CHUNK_LINES] for i in range(0, len(summary), MAX_CHUNK_LINES)]
+        k = len(windows)
+        out = []
+        for i, w in enumerate(windows):
+            # distinct pseudo line ranges per window (chunk ids are keyed on start_line)
+            s_line = 1 + (i * n_file) // k
+            e_line = max(s_line, ((i + 1) * n_file) // k)
+            url = f"{github_url_base}/{rel}#L{s_line}-L{e_line}" if github_url_base else ""
+            out.append({
+                "repo": repo_name, "file": rel, "language": language,
+                "start_line": s_line, "end_line": e_line,
+                "text": f"{_header(rel, s_line, e_line, tokens)}\n\n" + "\n".join(w),
+                "github_url": url,
+            })
+        return out
 
     # Small files: keep as single chunk to avoid diluting path/filename signal
     if len(lines) <= MAX_CHUNK_LINES:
@@ -368,6 +401,28 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
                             "text": f"{_header(rel, s+1, e, tokens)}\n\n{body}",
                             "github_url": url,
                         })
+            if chunks:
+                return chunks
+
+    # GDScript: functions / inner classes / member blocks, annotations kept with their decl
+    if ext == ".gd":
+        spans = _godot.gd_spans(raw)
+        if spans:
+            chunks = []
+            tokens = _path_tokens(repo_name, rel)
+            for s0, e, _kind in spans:
+                if e - s0 > MAX_CHUNK_LINES:
+                    chunks.extend(_sliding_window(lines, s0, e, repo_name, rel, language, github_url_base, extra))
+                    continue
+                body = "\n".join(lines[s0:e]).strip()
+                if body:
+                    url = f"{github_url_base}/{rel}#L{s0+1}-L{e}" if github_url_base else ""
+                    chunks.append({
+                        "repo": repo_name, "file": rel, "language": language,
+                        "start_line": s0 + 1, "end_line": e,
+                        "text": f"{_header(rel, s0+1, e, tokens)}\n\n{body}",
+                        "github_url": url,
+                    })
             if chunks:
                 return chunks
 

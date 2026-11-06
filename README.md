@@ -111,6 +111,9 @@ docker compose pull cortex-mcp && docker compose up -d cortex-mcp
 | JavaScript | `.js`, `.jsx` | Semantic (tree-sitter) |
 | TypeScript | `.ts`, `.tsx` | Semantic (tree-sitter) |
 | Kotlin | `.kt`, `.kts` | Semantic (tree-sitter) |
+| GDScript | `.gd` | Semantic (tree-sitter): functions, inner classes, member blocks; `@annotations` kept with their declaration; `class_name`/`extends` as context |
+| Godot scenes/resources/project | `.tscn`, `.tres`, `project.godot` | Summary: node tree + scripts + instances + signal connections / resource type + properties / autoloads, main scene, input actions |
+| Godot text | `.gdshader`, `.dialogue` | Sliding window |
 | C# | `.cs` | Semantic (tree-sitter) |
 | Svelte | `.svelte` | Sliding window |
 | Java | `.java` | Sliding window |
@@ -136,6 +139,7 @@ Built from static analysis (no LLM):
 - **Import edges** — `import`/`from` (Python), `import`/`require` (JS/TS/Svelte), `import` (Kotlin). Resolves path aliases (`$lib/` → `src/lib/`).
 - **Call edges** — JS/TS/Svelte: named imports matched against call sites. Kotlin: imported names that are called or used as receivers (`Foo.bar`, `Foo::class`), plus same-package classes/objects that are called
 - **Inheritance edges** — `class Foo(Bar)` (Python), `extends`/`implements` (TS/Kotlin)
+- **Godot** — `extends ClassName` / `extends "res://…"` (inherits), `preload`/`load("res://…")` and `.tscn`/`.tres`/`project.godot` resource references (import), `class_name` and autoload usages (call). `res://` resolves against the folder holding `project.godot`; `uid://` via `.uid` files and scene headers. `get_neighbors` accepts `res://` paths
 - **Degree centrality** — files imported by many others score higher in search results
 - **Louvain communities** — files clustered by structural connectivity
 
