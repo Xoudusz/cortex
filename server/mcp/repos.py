@@ -33,7 +33,8 @@ def _load_repos_meta(workspace: str = "") -> dict:
             with open(path) as f:
                 data = json.load(f)
             if isinstance(data, dict):
-                return {"repos": data.get("repos", []), "indexed_at": data.get("indexed_at", {})}
+                return {"repos": data.get("repos", []), "indexed_at": data.get("indexed_at", {}),
+                        "errors": data.get("errors", {})}
             if isinstance(data, list) and data:
                 return {"repos": data, "indexed_at": {}}
     except Exception:
@@ -58,6 +59,20 @@ def _save_repos(repos: list, workspace: str = "") -> None:
     """Replace the tracked repo list on disk, preserving other metadata fields."""
     meta = _load_repos_meta(workspace)
     meta["repos"] = repos
+    _save_repos_meta(meta, workspace)
+
+
+def _record_index_result(repo_name: str, error: str | None, workspace: str = "") -> None:
+    """Success: stamp indexed_at, clear the error. Failure: store the error, drop indexed_at
+    (an 'indexed' badge must mean the repo's chunks are actually in the index)."""
+    meta = _load_repos_meta(workspace)
+    errors = meta.setdefault("errors", {})
+    if error:
+        errors[repo_name] = error[:500]
+        meta.setdefault("indexed_at", {}).pop(repo_name, None)
+    else:
+        errors.pop(repo_name, None)
+        meta.setdefault("indexed_at", {})[repo_name] = datetime.now(timezone.utc).isoformat()
     _save_repos_meta(meta, workspace)
 
 
