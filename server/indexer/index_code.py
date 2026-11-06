@@ -88,12 +88,34 @@ def sparse_embed(text: str) -> tuple:
     return e.indices.tolist(), e.values.tolist()
 
 
+def _mask(text: str) -> str:
+    return text.replace(TOKEN, "***") if TOKEN else text
+
+
+def git_error(stderr: str) -> str:
+    """Last meaningful git stderr lines (token masked) plus a hint for the common causes."""
+    lines = [l.strip() for l in _mask(stderr or "").splitlines() if l.strip()]
+    msg = " | ".join(lines[-3:]) or "git printed no error"
+    low = msg.lower()
+    if "authentication failed" in low or "could not read username" in low or "403" in low:
+        msg += " (hint: GitHub token missing/expired or lacks access to this repo)"
+    elif "repository not found" in low or "not found" in low:
+        msg += (" (hint: wrong owner/name, or the token can't see it - collaborator repos need a"
+                " classic PAT with repo scope)")
+    elif "could not resolve host" in low or "timed out" in low:
+        msg += " (hint: network/DNS problem)"
+    return msg
+
+
 def clone_or_pull(repo: str) -> Path:
     name = repo.split("/")[1]
     dest = REPOS_DIR / name
     auth_url = f"https://Xoudusz:{TOKEN}@github.com/{repo}.git"
     if dest.exists():
         print(f"  pulling {repo}...", flush=True)
+        # The clone stored the token that was current then; refresh it so a rotated PAT works.
+        subprocess.run(["git", "-C", str(dest), "remote", "set-url", "origin", auth_url],
+                       capture_output=True, text=True)
         result = subprocess.run(
             ["git", "-C", str(dest), "pull"],
             capture_output=True, text=True,
@@ -101,7 +123,7 @@ def clone_or_pull(repo: str) -> Path:
         for line in result.stdout.strip().splitlines():
             print(f"    {line}", flush=True)
         if result.returncode != 0:
-            print(f"    git pull failed (rc={result.returncode}): {result.stderr.strip()}", flush=True)
+            print(f"    git pull failed (rc={result.returncode}): {git_error(result.stderr)}", flush=True)
     else:
         print(f"  cloning {repo} (shallow)...", flush=True)
         result = subprocess.run(
@@ -158,7 +180,7 @@ def main():
         try:
             repo_path = clone_or_pull(repo)
         except subprocess.CalledProcessError as e:
-            print(f"  SKIP {repo}: {e}", flush=True)
+            print(f"  SKIP {repo}: git clone failed (rc={e.returncode}): {git_error(e.output or e.stderr)}", flush=True)
             continue
 
         incremental = args.files is not None or args.remove_files is not None
