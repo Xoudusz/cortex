@@ -77,7 +77,8 @@ local/                  # cortex PyPI package — pipx install, stdio MCP, no se
     embedder.py         # fastembed dense (nomic-embed-text-v1.5) + BM25 sparse
     config.py           # ~/.cortex paths, config.toml (get_config, save_last_indexed_path)
     state.py            # graph cache, stats lifecycle
-    watcher.py          # CortexWatcher — debounced watchdog, auto-starts from cortex serve
+    watcher.py          # CortexWatcher — all index roots, code + .md, write events only, debounced
+    db.py               # shared embedded-Qdrant client per workspace + index_lock (never open QdrantClient elsewhere)
     __init__.py         # source checkouts: exposes <repo>/core as cortex.core (no symlink — broke Windows)
   hatch_build.py        # build hook: force-includes ../core as cortex/core when present
   tests/test_stdio_init.py  # e2e: `cortex serve` answers MCP initialize (CI: windows-latest)
@@ -143,6 +144,8 @@ debounce_seconds = 2.0
 last_path = ""          # auto-set by cortex index <path> (POSIX form)
 exclude_patterns = []   # glob patterns, e.g. ["*.log", "tmp/*"]
 ```
+
+Per workspace `~/.cortex/workspaces/<ws>/index_meta.json`: `schema` (bump `INDEX_SCHEMA` in config.py on incompatible payload changes — old index is wiped) + `roots` {path: indexed_at, git_head, notes, code}. Local stdio server must never print to stdout (JSON-RPC channel) — use logging.
 
 ## Eval
 
