@@ -128,6 +128,9 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         .repo-item:hover { border-color: rgba(167,139,250,0.25); }
         .repo-item.indexed { border-color: rgba(167,139,250,0.2); }
         .repo-info { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1; }
+        .repo-info { flex-wrap: wrap; }
+        .repo-error { flex-basis: 100%; min-width: 0; font-size: 0.72rem; line-height: 1.4; color: #fecdd3; white-space: normal; overflow-wrap: anywhere; }
+        .repo-error .repo-badge { background: #3b1d2a; color: #fecdd3; border-color: #be123c; margin-right: 0.4rem; }
         .repo-name { font-size: 0.8125rem; font-family: 'SF Mono', Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .repo-meta { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; }
         .repo-badge { font-size: 0.65rem; background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(167,139,250,0.3); padding: 0.1rem 0.4rem; border-radius: 4px; }
@@ -697,7 +700,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 const hasIndexedAt = isTracked && !!indexedAt[name];
                 const age = hasIndexedAt ? timeAgo(indexedAt[name]) : '';
                 const err = isTracked ? errors[name] : '';
-                const errHtml = err ? '<div class="repo-meta"><span class="repo-badge" style="background:#3b1d2a;color:#fecdd3" title="' + escapeHtml(err) + '">index failed</span><span class="repo-age" style="white-space:normal">' + escapeHtml(err.slice(0, 160)) + '</span></div>' : '';
+                const errHtml = err ? '<div class="repo-error" title="' + escapeHtml(err) + '"><span class="repo-badge">index failed</span>' + escapeHtml(err.slice(0, 300)) + '</div>' : '';
                 return '<div class="repo-item' + (hasIndexedAt ? ' indexed' : '') + '" data-repo="' + escapeHtml(repo) + '"><div class="repo-info"><span class="repo-name">' + escapeHtml(repo) + '</span>' + (hasIndexedAt ? '<div class="repo-meta"><span class="repo-badge">indexed</span><span class="repo-age">' + escapeHtml(age) + '</span></div>' : '') + errHtml + '</div><div class="repo-actions">' + (isTracked ? '<button class="secondary small repo-reindex-btn">Reindex</button><button class="danger small repo-remove-btn">Remove</button>' : '<button class="secondary small repo-add-btn">Add to index</button>') + '</div></div>';
             }).join('');
             listDiv.querySelectorAll('.repo-reindex-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; const name = repo.split('/')[1]; btn.disabled = true; btn.textContent = '...'; try { await triggerReindex(false, true, name); showRepoMsg('Reindexing ' + name + '...', 'info'); } catch (err) { showRepoMsg(err.message, 'error'); } finally { btn.disabled = false; btn.textContent = 'Reindex'; } }); });
