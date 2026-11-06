@@ -49,6 +49,7 @@ jobs:
           python tests/test_windows_local.py
           python tests/test_server_indexer.py
           python tests/test_ignores.py
+          python tests/test_godot.py
 
   test-windows:
     # Issue #4: git installs on Windows shipped without cortex.core. Build a real

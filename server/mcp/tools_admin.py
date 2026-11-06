@@ -125,9 +125,10 @@ def register_admin(mcp) -> None:
         meta = _get_code_graph_meta(repo)
         if not meta:
             return f"No graph data for '{repo}'. Run reindex(code=True, repo='{repo}') first."
+        file = file.removeprefix("res://")  # Godot paths: res:// is relative to the project root
         file_meta = meta.get(file)
         if file_meta is None:
-            matches = [f for f in meta if file in f]
+            matches = sorted((f for f in meta if f.endswith("/" + file) or file in f), key=len)
             if not matches:
                 return f"File '{file}' not found in graph for '{repo}'."
             file = matches[0]

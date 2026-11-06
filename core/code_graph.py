@@ -9,6 +9,13 @@ from pathlib import Path
 log = logging.getLogger("cortex.graph")
 
 try:
+    from . import godot as _godot
+except ImportError:  # server: core/ is on sys.path as top-level modules
+    import godot as _godot
+
+_GODOT_EXTS = (".gd", ".tscn", ".tres", ".godot")
+
+try:
     import networkx as nx
     _NX_AVAILABLE = True
 except ImportError:
@@ -336,6 +343,17 @@ def build_code_graph(repo_path: Path, all_files: set):
             _add_edge(G, rel, target, "call")
         for target in _extract_inheritance_targets(path, ext, all_files, rel, symbol_to_file):
             _add_edge(G, rel, target, "inherits")
+    godot_files = [f for f in all_files if f.endswith(_GODOT_EXTS)]
+    if godot_files:
+        proj = _godot.GodotProject(repo_path, all_files)
+        for rel in godot_files:
+            try:
+                text = (repo_path / rel).read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            for target, kind in _godot.gd_edges(rel, text, proj):
+                if target in all_files:
+                    _add_edge(G, rel, target, kind)
     return G
 
 

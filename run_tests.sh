@@ -36,6 +36,10 @@ echo "=== tests/test_ignores.py ==="
 $PYTHON tests/test_ignores.py
 
 echo ""
+echo "=== tests/test_godot.py ==="
+$PYTHON tests/test_godot.py
+
+echo ""
 echo "=== tests/test_incremental.py (real embeddings) ==="
 $PYTHON tests/test_incremental.py
 

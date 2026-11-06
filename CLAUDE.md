@@ -43,6 +43,7 @@ Auth: built-in OAuth 2.0 (Bearer token). Login at `/oauth/authorize` with `ADMIN
 ```
 core/                   # ONE shared lib — bundled into the wheel as cortex/core by local/hatch_build.py
   chunker.py            # tree-sitter + Roslyn chunking + Razor @code extraction + sliding-window
+  godot.py              # GDScript spans, .tscn/.tres/project.godot summaries, Godot graph edges (res:// + uid://)
   cache.py              # load_cache / save_cache — {mtime, hash} format, backward-compat
   graph.py              # facade — re-exports from code_graph, notes_graph, global_graph
   code_graph.py         # import/call/inheritance edges, centrality, Louvain + inject_roslyn_edges()
