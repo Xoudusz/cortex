@@ -39,7 +39,7 @@ Auth: built-in OAuth 2.0 (Bearer token). Login at `/oauth/authorize` with `ADMIN
 ## Structure
 
 ```
-core/                   # ONE shared lib — symlinked into local/cortex/core/
+core/                   # ONE shared lib — bundled into the wheel as cortex/core by local/hatch_build.py
   chunker.py            # tree-sitter + Roslyn chunking + Razor @code extraction + sliding-window
   cache.py              # load_cache / save_cache — {mtime, hash} format, backward-compat
   graph.py              # facade — re-exports from code_graph, notes_graph, global_graph
@@ -78,7 +78,9 @@ local/                  # cortex PyPI package — pipx install, stdio MCP, no se
     config.py           # ~/.cortex paths, config.toml (get_config, save_last_indexed_path)
     state.py            # graph cache, stats lifecycle
     watcher.py          # CortexWatcher — debounced watchdog, auto-starts from cortex serve
-    core -> ../../core  # symlink — shared lib
+    __init__.py         # source checkouts: exposes <repo>/core as cortex.core (no symlink — broke Windows)
+  hatch_build.py        # build hook: force-includes ../core as cortex/core when present
+  tests/test_stdio_init.py  # e2e: `cortex serve` answers MCP initialize (CI: windows-latest)
 docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 ```
 
@@ -138,7 +140,8 @@ enabled = true          # auto-start watcher on cortex serve
 debounce_seconds = 2.0
 
 [index]
-last_path = ""          # auto-set by cortex index <path>
+last_path = ""          # auto-set by cortex index <path> (POSIX form)
+roots = []              # every path passed to cortex index
 exclude_patterns = []   # glob patterns, e.g. ["*.log", "tmp/*"]
 ```
 

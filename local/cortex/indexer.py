@@ -1,5 +1,6 @@
 """Index notes and code from a local path into embedded Qdrant."""
 
+import logging
 import hashlib
 import os
 import re
@@ -13,12 +14,14 @@ from qdrant_client.models import (
     MatchValue, PointStruct, SparseVector, SparseVectorParams, VectorParams,
 )
 
-from .config import qdrant_path, data_dir, cache_file, VECTOR_SIZE, migrate_legacy
+from .config import qdrant_path, data_dir, cache_file, VECTOR_SIZE, migrate_legacy, ensure_index_schema
 from .embedder import embed, sparse_embed
 from .core.chunker import chunk_file, CODE_EXTS, SKIP_DIRS, _is_excluded
 from .core.cache import load_cache, save_cache
 from .core import graph as _graph
 from .core import roslyn_analyzer as _roslyn
+
+log = logging.getLogger("cortex.indexer")
 
 
 def _walk_code_files(root: Path, exclude_patterns: list) -> list[Path]:
@@ -29,7 +32,7 @@ def _walk_code_files(root: Path, exclude_patterns: list) -> list[Path]:
         for fname in files:
             p = Path(dirpath) / fname
             if p.suffix in CODE_EXTS:
-                rel = str(p.relative_to(root)).replace("\\", "/")
+                rel = p.relative_to(root).as_posix()
                 if not _is_excluded(rel, exclude_patterns):
                     found.append(p)
     return found
@@ -37,6 +40,7 @@ def _walk_code_files(root: Path, exclude_patterns: list) -> list[Path]:
 
 def _qdrant() -> QdrantClient:
     migrate_legacy()
+    ensure_index_schema()
     d = data_dir()
     d.mkdir(parents=True, exist_ok=True)
     try:
@@ -58,7 +62,7 @@ def _ensure_collection(client: QdrantClient, name: str) -> bool:
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
             sparse_vectors_config={"sparse": SparseVectorParams()},
         )
-        print(f"Created collection '{name}'")
+        log.info(f"Created collection '{name}'")
     return True
 
 
@@ -67,7 +71,7 @@ def _sparse_available() -> bool:
         sparse_embed("warmup")
         return True
     except Exception as e:
-        print(f"warn: sparse unavailable: {e}")
+        log.warning(f"warn: sparse unavailable: {e}")
         return False
 
 
@@ -102,7 +106,7 @@ def _parse_frontmatter(text: str) -> tuple:
 
 def _chunk_markdown(path: Path, notes_dir: Path) -> list:
     raw = path.read_text(encoding="utf-8")
-    rel = str(path.relative_to(notes_dir))
+    rel = path.relative_to(notes_dir).as_posix()
     modified_at = int(path.stat().st_mtime)
     text, tags = _parse_frontmatter(raw)
 
@@ -156,7 +160,7 @@ def index_notes(notes_dir: Path, show_progress: bool = False) -> int:
     cached = 0
 
     for path in tqdm(md_files, desc="notes", disable=not show_progress):
-        rel = str(path.relative_to(notes_dir))
+        rel = path.relative_to(notes_dir).as_posix()
         if _is_excluded(rel, exclude_patterns):
             continue
         mtime = path.stat().st_mtime
@@ -177,17 +181,17 @@ def index_notes(notes_dir: Path, show_progress: bool = False) -> int:
             client.upsert("notes", points)
             total += len(points)
             if not show_progress:
-                print(f"  {rel}: {len(points)} chunk(s)", flush=True)
+                log.info(f"  {rel}: {len(points)} chunk(s)")
         new_cache[rel] = {"mtime": mtime, "hash": content_hash}
 
     save_cache("notes", new_cache, cache_file())
-    print(f"Done. {total} chunks indexed, {cached}/{len(md_files)} files cached.", flush=True)
+    log.info(f"Done. {total} chunks indexed, {cached}/{len(md_files)} files cached.")
 
     try:
         G = _graph.build_notes_graph(notes_dir)
         _graph.persist_notes_graph(G, data_dir())
     except Exception as e:
-        print(f"  notes graph failed: {e}")
+        log.warning(f"  notes graph failed: {e}")
 
     return total
 
@@ -247,7 +251,7 @@ def index_code(code_dir: Path, show_progress: bool = False) -> int:
             new_cache[cache_key] = {"mtime": mtime, "hash": content_hash}
 
     save_cache("code", new_cache, cache_file())
-    print(f"  {repo_name}: {total} chunks from {len(code_files) - cached} files ({cached} cached)", flush=True)
+    log.info(f"  {repo_name}: {total} chunks from {len(code_files) - cached} files ({cached} cached)")
 
     all_files = {
         str(p.relative_to(code_dir)).replace("\\", "/") for p in code_files
@@ -274,7 +278,7 @@ def index_code(code_dir: Path, show_progress: bool = False) -> int:
                         points=pids,
                     )
     except Exception as e:
-        print(f"  graph failed: {e}")
+        log.warning(f"  graph failed: {e}")
 
     from .state import invalidate_graph_cache
     invalidate_graph_cache(repo_name)
@@ -293,12 +297,12 @@ def index_path(path: Path, show_progress: bool = False) -> None:
     code_files = _walk_code_files(path, [])
 
     if md_files:
-        print(f"\nIndexing notes from {path} ({len(md_files)} .md files)...")
+        log.info(f"Indexing notes from {path} ({len(md_files)} .md files)...")
         index_notes(path, show_progress=show_progress)
 
     if code_files:
-        print(f"\nIndexing code from {path} ({len(code_files)} files)...")
+        log.info(f"Indexing code from {path} ({len(code_files)} files)...")
         index_code(path, show_progress=show_progress)
 
     if not md_files and not code_files:
-        print(f"No indexable files found in {path}")
+        log.info(f"No indexable files found in {path}")

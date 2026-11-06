@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Mtime-based embedding cache — skip re-embedding unchanged files on full reindex."""
 
+import logging
 import json
 import os
 from pathlib import Path
+
+log = logging.getLogger("cortex.cache")
 
 
 def _default_cache_file() -> Path:
@@ -33,4 +36,4 @@ def save_cache(section: str, data: dict, cache_file: Path | None = None) -> None
         existing[section] = data
         cache_file.write_text(json.dumps(existing))
     except Exception as e:
-        print(f"warn: cache save failed: {e}", flush=True)
+        log.warning(f"warn: cache save failed: {e}")

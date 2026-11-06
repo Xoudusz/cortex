@@ -24,4 +24,8 @@ echo "=== tests/test_indexer.py ==="
 $PYTHON tests/test_indexer.py
 
 echo ""
+echo "=== tests/test_windows_local.py ==="
+$PYTHON tests/test_windows_local.py
+
+echo ""
 echo "All tests passed."
