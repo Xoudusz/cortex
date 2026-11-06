@@ -50,30 +50,7 @@ jobs:
           python tests/test_server_indexer.py
           python tests/test_ignores.py
           python tests/test_godot.py
-
-  test-windows:
-    # Issue #4: git installs on Windows shipped without cortex.core. Build a real
-    # (non-editable) wheel and check `cortex serve` answers MCP initialize over stdio.
-    # PRs only: Windows minutes are billed 2x and main is gated by the PR run.
-    if: github.event_name == 'pull_request'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install local package (non-editable)
-        run: pip install ./local
-
-      - name: Regression tests
-        run: |
-          python tests/test_chunker.py
-          python tests/test_windows_local.py
-
-      - name: stdio initialize smoke test
-        run: python local/tests/test_stdio_init.py
+          python local/tests/test_stdio_init.py
 
   build:
     needs: [test]

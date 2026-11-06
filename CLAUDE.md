@@ -84,7 +84,7 @@ local/                  # cortex PyPI package — pipx install, stdio MCP, no se
     db.py               # shared embedded-Qdrant client per workspace + index_lock (never open QdrantClient elsewhere)
     __init__.py         # source checkouts: exposes <repo>/core as cortex.core (no symlink — broke Windows)
   hatch_build.py        # build hook: force-includes ../core as cortex/core when present
-  tests/test_stdio_init.py  # e2e: `cortex serve` answers MCP initialize (CI: windows-latest)
+  tests/test_stdio_init.py  # e2e: `cortex serve` answers MCP initialize (CI: Linux test job; no Windows runner)
 docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 ```
 
