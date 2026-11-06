@@ -682,11 +682,11 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     warn.style.display = 'block';
                 }
                 // tracked repos stay visible even if the token can't list them (added by name)
-                renderRepos([...new Set([...ghRepos, ...indexedList])], indexedList, indexedAt);
+                renderRepos([...new Set([...ghRepos, ...indexedList])], indexedList, indexedAt, meta.errors || {});
             } catch (err) { listDiv.innerHTML = '<div class="message error">' + escapeHtml(err.message) + '</div>'; }
         }
 
-        function renderRepos(allRepos, indexedList, indexedAt) {
+        function renderRepos(allRepos, indexedList, indexedAt, errors = {}) {
             const listDiv = document.getElementById('repo-list');
             if (!allRepos.length) { listDiv.innerHTML = '<div class="empty">No repos found.</div>'; return; }
             const indexedSet = new Set(indexedList);
@@ -696,11 +696,13 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 const name = repo.split('/')[1];
                 const hasIndexedAt = isTracked && !!indexedAt[name];
                 const age = hasIndexedAt ? timeAgo(indexedAt[name]) : '';
-                return '<div class="repo-item' + (hasIndexedAt ? ' indexed' : '') + '" data-repo="' + escapeHtml(repo) + '"><div class="repo-info"><span class="repo-name">' + escapeHtml(repo) + '</span>' + (hasIndexedAt ? '<div class="repo-meta"><span class="repo-badge">indexed</span><span class="repo-age">' + escapeHtml(age) + '</span></div>' : '') + '</div><div class="repo-actions">' + (isTracked ? '<button class="secondary small repo-reindex-btn">Reindex</button><button class="danger small repo-remove-btn">Remove</button>' : '<button class="secondary small repo-add-btn">Add to index</button>') + '</div></div>';
+                const err = isTracked ? errors[name] : '';
+                const errHtml = err ? '<div class="repo-meta"><span class="repo-badge" style="background:#3b1d2a;color:#fecdd3" title="' + escapeHtml(err) + '">index failed</span><span class="repo-age" style="white-space:normal">' + escapeHtml(err.slice(0, 160)) + '</span></div>' : '';
+                return '<div class="repo-item' + (hasIndexedAt ? ' indexed' : '') + '" data-repo="' + escapeHtml(repo) + '"><div class="repo-info"><span class="repo-name">' + escapeHtml(repo) + '</span>' + (hasIndexedAt ? '<div class="repo-meta"><span class="repo-badge">indexed</span><span class="repo-age">' + escapeHtml(age) + '</span></div>' : '') + errHtml + '</div><div class="repo-actions">' + (isTracked ? '<button class="secondary small repo-reindex-btn">Reindex</button><button class="danger small repo-remove-btn">Remove</button>' : '<button class="secondary small repo-add-btn">Add to index</button>') + '</div></div>';
             }).join('');
             listDiv.querySelectorAll('.repo-reindex-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; const name = repo.split('/')[1]; btn.disabled = true; btn.textContent = '...'; try { await triggerReindex(false, true, name); showRepoMsg('Reindexing ' + name + '...', 'info'); } catch (err) { showRepoMsg(err.message, 'error'); } finally { btn.disabled = false; btn.textContent = 'Reindex'; } }); });
-            listDiv.querySelectorAll('.repo-remove-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; try { const data = await api('/api/repos/' + encodeURIComponent(repo), { method: 'DELETE' }); renderRepos(allRepos, data.repos || [], indexedAt); showRepoMsg('Removed ' + repo.split('/')[1] + ' from index', 'info'); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); } }); });
-            listDiv.querySelectorAll('.repo-add-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; btn.disabled = true; btn.textContent = '...'; try { const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo }) }); renderRepos(allRepos, data.repos || [], indexedAt); const name = repo.split('/')[1]; showRepoMsg('Added ' + name + ' — indexing...', 'info'); await triggerReindex(false, true, name); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); btn.disabled = false; btn.textContent = 'Add to index'; } }); });
+            listDiv.querySelectorAll('.repo-remove-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; try { const data = await api('/api/repos/' + encodeURIComponent(repo), { method: 'DELETE' }); renderRepos(allRepos, data.repos || [], indexedAt, errors); showRepoMsg('Removed ' + repo.split('/')[1] + ' from index', 'info'); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); } }); });
+            listDiv.querySelectorAll('.repo-add-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; btn.disabled = true; btn.textContent = '...'; try { const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo }) }); renderRepos(allRepos, data.repos || [], indexedAt, errors); const name = repo.split('/')[1]; showRepoMsg('Added ' + name + ' — indexing...', 'info'); await triggerReindex(false, true, name); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); btn.disabled = false; btn.textContent = 'Add to index'; } }); });
         }
 
         document.getElementById('repo-add-form').addEventListener('submit', async (e) => {

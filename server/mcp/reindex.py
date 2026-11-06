@@ -11,7 +11,7 @@ from collections import deque
 from datetime import datetime, timezone
 
 from state import _invalidate_graph_cache, _reindex_log, _stats, get_active_workspace, _workspace_data_dir
-from repos import _load_repos, _update_indexed_at, _repos_config_path
+from repos import _load_repos, _record_index_result, _repos_config_path
 from config import DATA_DIR, get_github_token
 
 log = logging.getLogger("cortex")
@@ -108,13 +108,18 @@ def _run_reindex(notes: bool, code: bool, repo: str = "", files=None, removed=No
                 cmd += ["--files"] + files
             if removed:
                 cmd += ["--remove-files"] + removed
+            first_line = len(_reindex_state["output"])
             _stream(cmd, "code", 600)
             _invalidate_graph_cache(repo)
-            if repo:
-                _update_indexed_at(repo)
-            else:
-                for r in _load_repos():
-                    _update_indexed_at(r.split("/")[1])
+            # index_code prints "SKIP owner/name: <reason>" for repos it could not clone/pull
+            failed = {}
+            for line in _reindex_state["output"][first_line:]:
+                m = re.search(r"SKIP ([^/\s]+)/([^:\s]+): (.*)", line)
+                if m:
+                    failed[m.group(2)] = m.group(3)
+            names = [repo] if repo else [r.split("/")[1] for r in _load_repos()]
+            for name in names:
+                _record_index_result(name, failed.get(name))
     except Exception as e:
         _reindex_state["error"] = str(e)
         log.error("reindex error: %s", e)
