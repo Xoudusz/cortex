@@ -187,12 +187,22 @@ jobs:
           printf "%b" "$body" > /tmp/release_notes.txt
           gh release create "v$VER" --title "v$VER" --notes-file /tmp/release_notes.txt
 
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.new == 'true'
+        with:
+          python-version: "3.12"
+
+      # Trusted publishing without pypa/gh-action-pypi-publish: that action is a Docker
+      # container action and the self-hosted runner has no Docker. Same OIDC flow, by hand:
+      # GitHub OIDC token (audience pypi) -> PyPI mint-token -> twine upload.
       - name: Build and publish cortex PyPI package
         if: steps.check.outputs.new == 'true'
         run: |
-          pip install build
-          python -m build local/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        if: steps.check.outputs.new == 'true'
-        with:
-          packages-dir: local/dist/
+          python -m pip install -q build twine
+          rm -rf local/dist && python -m build local/
+          oidc=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=pypi" | python -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          api=$(curl -sSf -X POST https://pypi.org/_/oidc/mint-token -d "{\"token\":\"$oidc\"}" \
+            | python -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+          echo "::add-mask::$api"
+          python -m twine upload --non-interactive -u __token__ -p "$api" local/dist/*
