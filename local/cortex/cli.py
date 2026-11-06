@@ -282,8 +282,14 @@ def doctor_cmd() -> None:
 
     last = get_config()["index"].get("last_path") or "(none)"
     click.echo(f"last indexed {last}")
-    for root in get_config()["index"].get("roots", []):
-        click.echo(f"root         {root}{'' if Path(root).exists() else ' (missing)'}")
+    from .config import read_index_meta
+    from .core.formatters import fmt_index_roots
+    roots = read_index_meta(ws).get("roots", {})
+    for line in fmt_index_roots(roots):
+        root = line.split(" ", 1)[0]
+        click.echo(f"root         {line}{'' if Path(root).exists() else ' (missing on disk)'}")
+    if indexed and not roots:
+        click.echo("note         index has no recorded roots - run: cortex index <path>")
 
     claude_json = Path.home() / ".claude.json"
     if claude_json.exists():

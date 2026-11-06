@@ -1,6 +1,51 @@
 """Shared result formatters for MCP search tools — used by server and local modes."""
 
+import time
 from datetime import datetime, timezone
+
+
+def strip_embed_header(text: str) -> str:
+    """Drop the synthetic `# repo/path (lines)` / path-token / framework lines the chunker
+    prepends for embedding — they only cost tokens in a result."""
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines) and lines[i].startswith("# "):
+        i += 1
+    if i == 0:
+        return text
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    return "\n".join(lines[i:])
+
+
+def _display_path(p: dict, fallback_prefix: str = "") -> str:
+    """Absolute POSIX path when the index recorded a root (local mode), else repo-relative."""
+    root = p.get("root")
+    if root:
+        return f"{root}/{p['file']}"
+    return f"{fallback_prefix}/{p['file']}" if fallback_prefix else p["file"]
+
+
+def fmt_age(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86400}d"
+
+
+def fmt_index_roots(roots: dict, now: float | None = None) -> list:
+    """One line per index root: `path @head (age ago) notes=N code=M`."""
+    now = now or time.time()
+    out = []
+    for root, m in sorted(roots.items()):
+        head = f" @{m['git_head']}" if m.get("git_head") else ""
+        age = f" ({fmt_age(now - m['indexed_at'])} ago)" if m.get("indexed_at") else ""
+        out.append(f"{root}{head}{age} notes={m.get('notes', 0)} code={m.get('code', 0)}")
+    return out
 
 
 def format_notes_parts(results) -> tuple:
@@ -18,8 +63,12 @@ def format_notes_parts(results) -> tuple:
         p = r.payload
         tags = p.get("tags", [])
         tag_str = f" `{'`, `'.join(tags)}`" if tags else ""
+        text = p["text"]
+        heading = p.get("heading", "")
+        if heading and text.startswith(heading + "\n"):
+            text = text[len(heading):].lstrip("\n")  # chunk text repeats the heading
         parts.append(
-            f"**{p['file']} > {p['heading']}** (score: {round(r.score, 3)}){tag_str}\n\n{p['text']}"
+            f"**{_display_path(p)} > {heading}** (score: {round(r.score, 3)}){tag_str}\n\n{text}"
         )
         matched_files.append(p.get("file", ""))
         matched_scores.append(r.score)
@@ -38,7 +87,7 @@ def format_code_results(deduped) -> str:
         centrality = file_meta.get("centrality")
         community = file_meta.get("community_id")
         header = (
-            f"**{p['repo']}/{p['file']}** "
+            f"**{_display_path(p, p.get('repo', ''))}** "
             f"lines {p['start_line']}-{p['end_line']} "
             f"({p.get('language', '')}) — score: {round(boosted_score, 3)}"
         )
@@ -47,7 +96,8 @@ def format_code_results(deduped) -> str:
         if community is not None:
             header += f" · community: {community}"
         url = p.get("github_url", "")
-        parts.append(f"{header}\n{url}\n\n{p['text']}" if url else f"{header}\n\n{p['text']}")
+        text = strip_embed_header(p["text"])
+        parts.append(f"{header}\n{url}\n\n{text}" if url else f"{header}\n\n{text}")
     return "\n\n---\n\n".join(parts)
 
 

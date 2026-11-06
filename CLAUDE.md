@@ -141,7 +141,6 @@ debounce_seconds = 2.0
 
 [index]
 last_path = ""          # auto-set by cortex index <path> (POSIX form)
-roots = []              # every path passed to cortex index
 exclude_patterns = []   # glob patterns, e.g. ["*.log", "tmp/*"]
 ```
 
