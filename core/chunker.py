@@ -33,7 +33,7 @@ def _extract_razor_cs_blocks(source: str) -> list:
 REPOS_DIR = Path(os.environ.get("REPOS_DIR", "/tmp/repos"))
 
 CODE_EXTS = {".js", ".ts", ".tsx", ".jsx", ".svelte", ".py", ".java", ".go", ".rs", ".css", ".html", ".kt", ".kts", ".gd", ".yml", ".yaml", ".cs", ".razor", ".cshtml"}
-SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", ".svelte-kit", "__pycache__", ".gradle", "target", "bin", "obj"}
+SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", ".svelte-kit", "__pycache__", ".gradle", "target", "bin", "obj", ".godot"}
 LANG_MAP = {
     ".js": "javascript", ".ts": "typescript", ".tsx": "typescript",
     ".jsx": "javascript", ".svelte": "svelte", ".py": "python",
@@ -45,6 +45,37 @@ LANG_MAP = {
 
 def _is_excluded(rel: str, patterns: list) -> bool:
     return any(fnmatch.fnmatch(rel, p) for p in patterns)
+
+
+def repo_ignore_patterns(root: Path) -> list:
+    """Per-repo exclude globs for _is_excluded():
+
+    - `.cortexignore` at the repo root, gitignore-like: `addons/gut/` or `/vendor` (anchored),
+      `*.min.js`, `# comments`. Unanchored entries match at any depth. No `!` negation.
+    - every directory containing a `.gdignore` (Godot's "do not import" marker).
+    """
+    pats: list = []
+    ci = root / ".cortexignore"
+    if ci.is_file():
+        for line in ci.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line or line.startswith(("#", "!")):
+                continue
+            anchored = line.startswith("/")
+            line = line.strip("/")
+            if not line:
+                continue
+            base = [line, line + "/*"]
+            pats += base if anchored else base + ["*/" + b for b in base]
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        if ".gdignore" in files:
+            rel = Path(dirpath).relative_to(root).as_posix()
+            if rel == ".":
+                return ["*"]
+            pats.append(rel + "/*")
+            dirs[:] = []
+    return pats
 
 
 CHUNK_LINES = 30

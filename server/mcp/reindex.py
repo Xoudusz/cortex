@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from state import _invalidate_graph_cache, _reindex_log, _stats, get_active_workspace, _workspace_data_dir
 from repos import _load_repos, _update_indexed_at, _repos_config_path
-from config import DATA_DIR
+from config import DATA_DIR, get_github_token
 
 log = logging.getLogger("cortex")
 
@@ -29,6 +29,9 @@ _reindex_state: dict = {
 def _workspace_env() -> dict:
     ws = get_active_workspace()
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    token, _ = get_github_token()
+    if token:
+        env["GITHUB_TOKEN"] = token
     if ws != "default":
         ws_data = str(_workspace_data_dir(ws))
         env["CORTEX_WORKSPACE"] = ws

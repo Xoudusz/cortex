@@ -11,7 +11,7 @@ import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from config import DATA_DIR, GITHUB_TOKEN, OLLAMA_URL, QDRANT_URL, STATS_FILE, VERSION, WEBHOOK_SECRET, embed, sparse_embed
+from config import DATA_DIR, get_github_token, read_settings, write_settings, OLLAMA_URL, QDRANT_URL, STATS_FILE, VERSION, WEBHOOK_SECRET, embed, sparse_embed
 from state import _reindex_log, _stats, _webhook_log
 from repos import _load_repos, _load_repos_meta, _save_repos
 from reindex import _enqueue, get_status, get_queue_snapshot, clear_cache as _clear_cache
@@ -173,22 +173,85 @@ async def _api_repos_meta_handler(request: Request) -> JSONResponse:
     return JSONResponse(_load_repos_meta())
 
 
+def _gh_headers(token: str) -> dict:
+    return {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+
+
 async def _api_github_repos(request: Request) -> JSONResponse:
-    """Fetch the authenticated user's non-archived GitHub repos via the API."""
-    if not GITHUB_TOKEN:
-        return JSONResponse({"error": "GITHUB_TOKEN not configured"}, status_code=503)
+    """All non-archived repos the token can see: owned, collaborator and organisation (paginated)."""
+    token, _ = get_github_token()
+    if not token:
+        return JSONResponse({"error": "No GitHub token configured (Admin > Settings)"}, status_code=503)
+    repos: list = []
+    url = "https://api.github.com/user/repos"
+    params = {"per_page": 100, "sort": "updated", "affiliation": "owner,collaborator,organization_member"}
     try:
-        resp = httpx.get(
-            "https://api.github.com/user/repos",
-            headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"},
-            params={"per_page": 100, "sort": "updated", "affiliation": "owner"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        repos = [r["full_name"] for r in resp.json() if not r.get("archived")]
+        async with httpx.AsyncClient(timeout=10) as client:
+            for _ in range(10):  # up to 1000 repos
+                resp = await client.get(url, headers=_gh_headers(token), params=params)
+                resp.raise_for_status()
+                repos += [r["full_name"] for r in resp.json() if not r.get("archived")]
+                nxt = resp.links.get("next", {}).get("url")
+                if not nxt:
+                    break
+                url, params = nxt, None
         return JSONResponse({"repos": repos})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _token_info(token: str, source: str) -> dict:
+    info = {"set": bool(token), "source": source}
+    if not token:
+        return info
+    info["hint"] = token[:4] + "..." + token[-4:]
+    info["type"] = "fine-grained" if token.startswith("github_pat_") else "classic" if token.startswith("ghp_") else "other"
+    return info
+
+
+async def _validate_token(token: str) -> dict:
+    """Ask GitHub who the token belongs to; classic tokens also report their scopes."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get("https://api.github.com/user", headers=_gh_headers(token))
+    if resp.status_code == 401:
+        raise ValueError("GitHub rejected the token (401)")
+    resp.raise_for_status()
+    scopes = [x.strip() for x in resp.headers.get("x-oauth-scopes", "").split(",") if x.strip()]
+    return {"login": resp.json().get("login", ""), "scopes": scopes}
+
+
+async def _api_settings_handler(request: Request) -> JSONResponse:
+    """GET: token status (never the token). PUT {github_token}: validate + store. DELETE: clear."""
+    if request.method == "PUT":
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        token = str(body.get("github_token", "")).strip()
+        if not token:
+            return JSONResponse({"error": "github_token is empty"}, status_code=400)
+        try:
+            who = await _validate_token(token)
+        except Exception as e:
+            return JSONResponse({"error": f"token check failed: {e}"}, status_code=400)
+        settings = read_settings()
+        settings["github_token"] = token
+        write_settings(settings)
+        log.info("[settings] GitHub token updated (user %s)", who["login"])
+        return JSONResponse({**_token_info(token, "settings"), **who})
+    if request.method == "DELETE":
+        settings = read_settings()
+        settings.pop("github_token", None)
+        write_settings(settings)
+        log.info("[settings] GitHub token cleared from settings")
+    token, source = get_github_token()
+    info = _token_info(token, source)
+    if token:
+        try:
+            info.update(await _validate_token(token))
+        except Exception as e:
+            info["error"] = str(e)
+    return JSONResponse(info)
 
 
 async def _api_webhook_log_handler(request: Request) -> JSONResponse:

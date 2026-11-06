@@ -30,6 +30,8 @@ Auth: built-in OAuth 2.0 (Bearer token). Login at `/oauth/authorize` with `ADMIN
 - `GET /api/status` — reindex status
 - `POST /api/reindex` — `{"notes": true, "code": true, "repo": ""}`
 - `GET /api/stats` — collection counts + ollama status
+- `GET|PUT|DELETE /api/settings` — GitHub token status / set (validated against GitHub, stored in `data/settings.json` 0600, overrides env) / clear. Never returns the token
+- `GET /api/github/repos` — owner + collaborator + org repos, paginated
 
 **Unprotected endpoints:**
 - `GET /health` — healthchecks
@@ -116,7 +118,8 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 - `_job_queue` (deque) + `_reindex_worker` thread processes jobs sequentially — webhooks/watcher/MCP tool all call `_enqueue()`, nothing dropped
 - `_enqueue()` coalesces same-repo incremental webhook jobs (merges file lists instead of queuing duplicate)
 - Watchdog debounces 60s before triggering notes reindex (env: `WATCH_DEBOUNCE`)
-- Code indexer clones repos via `GITHUB_TOKEN` env var — required for private repos
+- Code indexer clones repos with `config.get_github_token()` (dashboard setting > `GITHUB_TOKEN` env), passed to the subprocess env by `reindex._workspace_env()`
+- Per-repo excludes: `core.chunker.repo_ignore_patterns()` (`.cortexignore` + `.gdignore` dirs); full reindex deletes chunks of gone/excluded files
 - Qdrant `query_points()` API (v1.17+) — `search()` is removed
 
 ## Env vars
