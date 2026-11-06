@@ -3,6 +3,8 @@ name: Deploy
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
@@ -10,19 +12,21 @@ permissions:
   id-token: write
 
 concurrency:
-  group: deploy-main
+  group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
-          fetch-depth: 0
+          python-version: "3.12"
 
       - name: Test server imports
         env:
@@ -36,10 +40,42 @@ jobs:
           pip install -q -e local/
           python local/tests/test_imports.py
 
-      - name: Test chunker + indexer edge cases
+      - name: Test chunker + indexer + local regressions
         run: |
           python tests/test_chunker.py
           python tests/test_indexer.py
+          python tests/test_windows_local.py
+
+  test-windows:
+    # Issue #4: git installs on Windows shipped without cortex.core. Build a real
+    # (non-editable) wheel and check `cortex serve` answers MCP initialize over stdio.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install local package (non-editable)
+        run: pip install ./local
+
+      - name: Regression tests
+        run: |
+          python tests/test_chunker.py
+          python tests/test_windows_local.py
+
+      - name: stdio initialize smoke test
+        run: python local/tests/test_stdio_init.py
+
+  build:
+    needs: [test, test-windows]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Read version
         id: ver

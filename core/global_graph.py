@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Global cross-repo graph — scans root config files for inter-repo references."""
 
+import logging
 import json
 import re
 from pathlib import Path
+
+log = logging.getLogger("cortex.graph")
 
 try:
     import networkx as nx
@@ -84,4 +87,4 @@ def build_global_graph(repo_paths: dict, data_dir: Path) -> None:
     }
     out = data_dir / "graph_global.json"
     out.write_text(json.dumps(data))
-    print(f"  global graph: {len(repo_names)} repos, {len(data['edges'])} cross-repo edges -> {out.name}")
+    log.info(f"  global graph: {len(repo_names)} repos, {len(data['edges'])} cross-repo edges -> {out.name}")

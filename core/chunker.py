@@ -261,7 +261,7 @@ def chunk_file(path: Path, repo_name: str, base_dir: Path | None = None, github_
     ext = path.suffix
     base = base_dir if base_dir else path.parent
     try:
-        rel = str(path.relative_to(base))
+        rel = path.relative_to(base).as_posix()
     except ValueError:
         rel = path.name
     language = LANG_MAP.get(ext, ext.lstrip("."))

@@ -134,7 +134,7 @@ Graph-augmented RAG builds structural graphs at index time, then uses them to bo
 Built from static analysis (no LLM):
 
 - **Import edges** — `import`/`from` (Python), `import`/`require` (JS/TS/Svelte), `import` (Kotlin). Resolves path aliases (`$lib/` → `src/lib/`).
-- **Call edges** — named imports matched against call sites
+- **Call edges** — JS/TS/Svelte: named imports matched against call sites. Kotlin: imported names that are called or used as receivers (`Foo.bar`, `Foo::class`), plus same-package classes/objects that are called
 - **Inheritance edges** — `class Foo(Bar)` (Python), `extends`/`implements` (TS/Kotlin)
 - **Degree centrality** — files imported by many others score higher in search results
 - **Louvain communities** — files clustered by structural connectivity

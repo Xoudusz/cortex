@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Code graph extraction — import/call/inheritance edges, centrality, Louvain communities."""
 
+import logging
 import json
 import re
 from pathlib import Path
+
+log = logging.getLogger("cortex.graph")
 
 try:
     import networkx as nx
     _NX_AVAILABLE = True
 except ImportError:
     _NX_AVAILABLE = False
-    print("Warning: networkx not installed — graph features disabled")
+    log.warning("Warning: networkx not installed - graph features disabled")
 
 _IMPORT_RE: dict = {
     "py": re.compile(r'^(?:from|import)\s+([\w.]+)', re.MULTILINE),
@@ -170,7 +173,53 @@ def _extract_named_imports_map(src: str) -> dict:
     return result
 
 
-def _extract_call_targets(path: Path, ext: str, all_files: set, rel: str) -> list:
+_KT_IMPORT_RE = re.compile(r'^import\s+([\w.]+?)(?:\s+as\s+(\w+))?\s*$', re.MULTILINE)
+_KT_QUALIFIED_RE = re.compile(r'\b([A-Z]\w*)\s*(?:\.|::)')
+
+
+def _extract_kotlin_call_targets(src: str, all_files: set, rel: str, symbol_to_file: dict) -> list:
+    """Kotlin call edges: imported names that are used, plus same-package types that are used.
+
+    "Used" = called (`Foo(`, `bar(`) or referenced as a receiver (`Foo.bar`, `Foo::class`).
+    Same-package (same directory) resolution only considers capitalized names — classes and
+    objects — because lowercase method names collide too easily.
+    """
+    called = {m.group(1) for m in _CALL_RE.finditer(src)}
+    called |= {m.group(1) for m in _KT_QUALIFIED_RE.finditer(src)}
+    targets: set = set()
+    imported: set = set()
+    for m in _KT_IMPORT_RE.finditer(src):
+        fq, alias = m.group(1), m.group(2)
+        if fq.endswith("."):
+            continue
+        simple = fq.rsplit(".", 1)[-1]
+        imported.add(simple)
+        if (alias or simple) not in called:
+            continue
+        resolved = _resolve_import(rel, fq, all_files, Path(rel).suffix)
+        if not resolved:
+            # top-level function or nested symbol: resolve by declared name
+            resolved = symbol_to_file.get(simple)
+        if resolved and resolved != rel:
+            targets.add(resolved)
+    rel_dir = Path(rel).parent
+    for name in called:
+        if name in imported or not name[:1].isupper():
+            continue
+        target = symbol_to_file.get(name)
+        if target and target != rel and Path(target).parent == rel_dir and Path(target).suffix in (".kt", ".kts"):
+            targets.add(target)
+    return list(targets)
+
+
+def _extract_call_targets(path: Path, ext: str, all_files: set, rel: str,
+                          symbol_to_file: dict | None = None) -> list:
+    if ext in (".kt", ".kts"):
+        try:
+            src = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return []
+        return _extract_kotlin_call_targets(src, all_files, rel, symbol_to_file or {})
     if ext not in (".js", ".jsx", ".ts", ".tsx", ".svelte"):
         return []
     try:
@@ -283,7 +332,7 @@ def build_code_graph(repo_path: Path, all_files: set):
             resolved = _resolve_import(rel, imp, all_files, ext)
             if resolved and resolved != rel:
                 _add_edge(G, rel, resolved, "import")
-        for target in _extract_call_targets(path, ext, all_files, rel):
+        for target in _extract_call_targets(path, ext, all_files, rel, symbol_to_file):
             _add_edge(G, rel, target, "call")
         for target in _extract_inheritance_targets(path, ext, all_files, rel, symbol_to_file):
             _add_edge(G, rel, target, "inherits")
@@ -333,7 +382,7 @@ def persist_code_graph(G, metadata: dict, repo_name: str, data_dir: Path) -> Non
     }
     out = data_dir / f"graph_{repo_name}.json"
     out.write_text(json.dumps(data))
-    print(
+    log.info(
         f"  graph: {len(data['nodes'])} nodes, {len(data['edges'])} edges "
         f"(import:{edge_counts['import']} call:{edge_counts['call']} "
         f"inherits:{edge_counts['inherits']}) -> {out.name}"

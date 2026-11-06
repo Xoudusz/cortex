@@ -1,7 +1,10 @@
 """Debounced filesystem watcher for automatic reindex on file changes."""
 
+import logging
 import threading
 from pathlib import Path
+
+log = logging.getLogger("cortex.watcher")
 
 try:
     from watchdog.observers import Observer
@@ -30,7 +33,7 @@ try:
                 from .indexer import index_path
                 index_path(self._path)
             except Exception as e:
-                print(f"[watcher] reindex failed: {e}", flush=True)
+                log.warning(f"[watcher] reindex failed: {e}")
 
         def start(self):
             handler = type("_H", (_Handler,), {
@@ -42,7 +45,7 @@ try:
             self._observer.schedule(handler, str(self._path), recursive=True)
             self._observer.daemon = True
             self._observer.start()
-            print(f"[cortex] watching {self._path} (debounce {self._debounce}s)", flush=True)
+            log.info(f"[cortex] watching {self._path} (debounce {self._debounce}s)")
 
         def stop(self):
             self._observer.stop()
@@ -54,7 +57,7 @@ except ImportError:
             pass
 
         def start(self):
-            print("[cortex] watchdog not installed — auto-reindex disabled", flush=True)
+            log.info("[cortex] watchdog not installed - auto-reindex disabled")
 
         def stop(self):
             pass

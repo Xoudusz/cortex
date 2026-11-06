@@ -15,14 +15,24 @@ from qdrant_client.models import Prefetch, Fusion, SparseVector
 from .config import (
     qdrant_path, data_dir, stats_file, VERSION, VECTOR_SIZE,
     WORKSPACES_DIR, get_active_workspace, set_active_workspace,
-    get_workspace_dir, PPR_THRESHOLD, get_config,
+    get_workspace_dir, PPR_THRESHOLD, get_config, ensure_index_schema,
 )
 from .embedder import embed, sparse_embed
 from .state import _stats, get_graph_meta, save_stats, invalidate_graph_cache
 from .indexer import index_path
 from .core.formatters import format_notes_parts, format_code_results, fmt_stats
 
-mcp = MCPServer("cortex")
+mcp = MCPServer("cortex", version=VERSION)
+log = logging.getLogger("cortex")
+
+
+class _ListHandler(logging.Handler):
+    def __init__(self, sink: list):
+        super().__init__(logging.INFO)
+        self._sink = sink
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._sink.append(record.getMessage())
 
 
 def _log_search(tool: str, query: str, top: list) -> None:
@@ -48,17 +58,19 @@ def _qdrant() -> QdrantClient:
 
 def _run_reindex(path_str: str) -> None:
     _reindex_state.update(running=True, started_at=time.time(), output=[], error=None, done=False)
-    import io
-    from contextlib import redirect_stdout
-    buf = io.StringIO()
+    # Capture indexer log lines for reindex_status(). Never print: stdout is the MCP channel.
+    capture = _ListHandler(_reindex_state["output"])
+    logging.getLogger("cortex").addHandler(capture)
+    log.info("reindex started: %s", path_str)
     try:
-        with redirect_stdout(buf):
-            index_path(Path(path_str))
-        _reindex_state["output"] = buf.getvalue().splitlines()
+        index_path(Path(path_str))
         _stats["reindex_count"] += 1
+        log.info("reindex finished: %s (%.0fs)", path_str, time.time() - _reindex_state["started_at"])
     except Exception as e:
         _reindex_state["error"] = str(e)
+        log.exception("reindex failed: %s", path_str)
     finally:
+        logging.getLogger("cortex").removeHandler(capture)
         _reindex_state["running"] = False
         _reindex_state["done"] = True
         save_stats()
@@ -438,10 +450,12 @@ def run() -> None:
         format="%(asctime)s [%(name)s] %(message)s",
         datefmt="%H:%M:%S",
         handlers=[logging.handlers.RotatingFileHandler(
-            log_path, maxBytes=5 * 1024 * 1024, backupCount=3,
+            log_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8",
         )],
         force=True,
     )
+    log.info("cortex %s starting (workspace: %s)", VERSION, get_active_workspace())
+    ensure_index_schema()
     cfg = get_config()
     if cfg["watch"]["enabled"]:
         last = cfg["index"].get("last_path", "")

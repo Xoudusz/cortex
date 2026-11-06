@@ -19,14 +19,25 @@ from .config import (
 @click.version_option(VERSION, prog_name="cortex")
 def cli() -> None:
     """cortex: local semantic search MCP server."""
+    # Windows consoles default to cp1252; never crash on non-ASCII output (e.g. `claude mcp get`).
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
 
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
-@click.option("--progress/--no-progress", default=True, help="Show tqdm progress bar.")
+@click.option("--progress/--no-progress", default=None,
+              help="Show tqdm progress bar (default: only when stderr is a terminal).")
 def index(path: str, progress: bool) -> None:
     """Index PATH (notes and/or code) into ~/.cortex."""
+    import logging
     from .indexer import index_path
+    logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout, force=True)
+    if progress is None:
+        progress = sys.stderr.isatty()
     index_path(Path(path), show_progress=progress)
     save_last_indexed_path(path)
 
@@ -34,8 +45,25 @@ def index(path: str, progress: bool) -> None:
 @cli.command()
 def serve() -> None:
     """Run cortex MCP server on stdio."""
-    from .mcp_server import run
-    run()
+    # stdout is the MCP channel: startup failures go to stderr (shown by `claude mcp get` / logs)
+    # instead of dying silently as "Connection closed".
+    try:
+        from .mcp_server import run
+    except Exception:
+        import traceback
+        sys.stderr.write(f"cortex {VERSION}: failed to start (import error):\n{traceback.format_exc()}")
+        sys.stderr.write("Try reinstalling: pipx install --force cortex-local\n")
+        sys.exit(1)
+    try:
+        run()
+    except KeyboardInterrupt:
+        pass
+    except Exception:
+        import logging
+        import traceback
+        logging.getLogger("cortex").exception("server crashed")
+        sys.stderr.write(f"cortex {VERSION}: server error:\n{traceback.format_exc()}")
+        sys.exit(1)
 
 
 @cli.command()
@@ -199,7 +227,7 @@ def install_cmd(scope: str) -> None:
         capture_output=True, text=True,
     )
     if result.returncode == 0:
-        click.echo(f"Done. cortex is ready (scope: {scope}) — restart Claude Code to activate.")
+        click.echo(f"Done. cortex is ready (scope: {scope}) - restart Claude Code to activate.")
     else:
         click.echo(f"MCP registration failed. Run manually:\n  {mcp_cmd}")
         click.echo(result.stderr.strip())
@@ -231,17 +259,21 @@ def doctor_cmd() -> None:
     click.echo(f"version      {VERSION}")
 
     cache_ok = MODELS_DIR.exists() and any(MODELS_DIR.iterdir())
-    click.echo(f"model cache  {'ok' if cache_ok else 'missing — run: cortex pull-models'}")
+    click.echo(f"model cache  {'ok' if cache_ok else 'missing - run: cortex pull-models'}")
 
     claude = shutil.which("claude")
     mcp_status = "claude not found in PATH"
     if claude:
         r = subprocess.run([claude, "mcp", "get", "cortex"], capture_output=True, text=True)
         if r.returncode == 0:
-            detail = r.stdout.strip().splitlines()[0] if r.stdout.strip() else "registered"
-            mcp_status = detail
+            fields = {}
+            for line in r.stdout.splitlines():
+                key, sep, val = line.strip().partition(":")
+                if sep and key in ("Scope", "Status"):
+                    fields[key] = val.strip()
+            mcp_status = ", ".join(f"{k.lower()}: {v}" for k, v in fields.items()) or "registered"
         else:
-            mcp_status = "not registered — run: cortex install"
+            mcp_status = "not registered - run: cortex install"
     click.echo(f"MCP          {mcp_status}")
 
     ws = get_active_workspace()
@@ -250,6 +282,8 @@ def doctor_cmd() -> None:
 
     last = get_config()["index"].get("last_path") or "(none)"
     click.echo(f"last indexed {last}")
+    for root in get_config()["index"].get("roots", []):
+        click.echo(f"root         {root}{'' if Path(root).exists() else ' (missing)'}")
 
     claude_json = Path.home() / ".claude.json"
     if claude_json.exists():

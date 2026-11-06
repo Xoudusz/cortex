@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Notes graph — Obsidian wikilink edges and Personalized PageRank augmentation."""
 
+import logging
 import json
 import re
 from pathlib import Path
+
+log = logging.getLogger("cortex.graph")
 
 try:
     import networkx as nx
     _NX_AVAILABLE = True
 except ImportError:
     _NX_AVAILABLE = False
-    print("Warning: networkx not installed — graph features disabled")
+    log.warning("Warning: networkx not installed - graph features disabled")
 
 _WIKILINK_RE = re.compile(r'\[\[([^\[\]|#]+?)(?:\|[^\[\]]+)?\]\]')
 
@@ -52,7 +55,7 @@ def persist_notes_graph(G, data_dir: Path) -> None:
     }
     out = data_dir / "graph_notes.json"
     out.write_text(json.dumps(data))
-    print(f"  notes graph: {len(data['nodes'])} nodes, {len(data['edges'])} wikilink edges -> {out.name}")
+    log.info(f"  notes graph: {len(data['nodes'])} nodes, {len(data['edges'])} wikilink edges -> {out.name}")
 
 
 def ppr_augment(matched_files: list, scores: list, graph_path: Path, threshold: float = 0.03, _return_reason: bool = False):
