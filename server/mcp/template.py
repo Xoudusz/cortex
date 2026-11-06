@@ -107,8 +107,9 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         .stat-value.error { color: var(--error); }
         .section { margin-top: 1.5rem; }
         .section-title { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem; }
-        .admin-tabs { display:flex; gap:0.2rem; margin-bottom:0; border-bottom:1px solid var(--border); }
-        .admin-tab { background:transparent; border:none; border-bottom:2px solid transparent; color:var(--text-muted); padding:0.4rem 0.75rem; cursor:pointer; font-size:0.8rem; font-weight:500; transition:all 0.15s; margin-bottom:-1px; border-radius:0; }
+        .admin-tabs { display:flex; gap:0.2rem; margin-bottom:0; border-bottom:1px solid var(--border); overflow-x:auto; scrollbar-width:none; }
+        .admin-tabs::-webkit-scrollbar { display:none; }
+        .admin-tab { flex:0 0 auto; white-space:nowrap; background:transparent; border:none; border-bottom:2px solid transparent; color:var(--text-muted); padding:0.4rem 0.75rem; cursor:pointer; font-size:0.8rem; font-weight:500; transition:all 0.15s; margin-bottom:-1px; border-radius:0; }
         .admin-tab:hover { color:var(--text); transform:none; box-shadow:none; background:transparent; }
         .admin-tab.active { color:var(--accent); border-bottom-color:var(--accent); background:transparent; }
         .admin-section { display:none; padding-top:1rem; }
@@ -661,8 +662,8 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         }
 
         api('/api/status').then(data => {
-            updateQueueDisplay(data.queue);
-            syncButtonStates(data.running, data.queue);
+            updateQueueDisplay(data.current_job, data.queue);
+            syncButtonStates(data.current_job, data.queue);
             if (data.running || (data.queue && data.queue.length)) pollStatus();
             else if (data.done) { let text = 'Last run: done (' + Math.round(data.elapsed_seconds) + 's)' + NL + NL; text += (data.output || []).join(NL); document.getElementById('reindex-status').textContent = text; }
         }).catch(() => {});
@@ -819,7 +820,15 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             const maxC = Math.max(...data.nodes.map(n => n.centrality || 0), 0.001);
             const r = d => 4 + 10 * ((d.centrality || 0) / maxC);
             const g = svg.append('g');
-            svg.call(d3.zoom().scaleExtent([0.1, 8]).on('zoom', e => g.attr('transform', e.transform)));
+            // big graphs: label only the most central nodes until zoomed in (labels piled up on phones)
+            const LABEL_TOP = 40;
+            const ranked = [...data.nodes].sort((a, b) => (b.centrality || 0) - (a.centrality || 0));
+            const keyLabel = new Set(data.nodes.length > LABEL_TOP ? ranked.slice(0, LABEL_TOP) : data.nodes);
+            let labels = null;
+            svg.call(d3.zoom().scaleExtent([0.1, 8]).on('zoom', e => {
+                g.attr('transform', e.transform);
+                if (labels) labels.attr('display', d => (e.transform.k >= 2 || keyLabel.has(d)) ? null : 'none');
+            }));
             const defs=svg.append('defs');[['arr-import','#3d4466'],['arr-call','#7c3210'],['arr-inherits','#1a5c3a']].forEach(([id,color])=>{defs.append('marker').attr('id',id).attr('viewBox','0 -4 8 8').attr('refX',16).attr('refY',0).attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto').append('path').attr('d','M0,-4L8,0L0,4').attr('fill',color);});
             const EDGE_COLOR={'import':'#2d3248','call':'#7c3210','inherits':'#1a5c3a'};const EDGE_MARKER={'import':'url(#arr-import)','call':'url(#arr-call)','inherits':'url(#arr-inherits)'};const link=g.append('g').selectAll('line').data(data.edges).join('line').attr('stroke',d=>EDGE_COLOR[d.type]||EDGE_COLOR.import).attr('stroke-width',d=>d.type==='inherits'?1.5:1).attr('marker-end',d=>EDGE_MARKER[d.type]||EDGE_MARKER.import).attr('opacity',0.6);
             const node = g.append('g').selectAll('g').data(data.nodes).join('g').attr('cursor','pointer')
@@ -840,7 +849,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     e.stopPropagation();
                 });
             node.append('circle').attr('r',r).attr('fill',d=>GRAPH_COLORS[(d.community_id||0)%GRAPH_COLORS.length]).attr('stroke','var(--bg)').attr('stroke-width',1.5).attr('opacity',0.88);
-            node.append('text').text(d=>{ const id=d.id||d.file||''; return id.split('/').pop().replace(/\\.(ts|tsx|js|jsx|py|kt|kts|svelte)$/,''); }).attr('font-size','8px').attr('fill','#8896a8').attr('text-anchor','middle').attr('dy',d=>r(d)+9).style('pointer-events','none').style('user-select','none');
+            labels = node.append('text').attr('display', d => keyLabel.has(d) ? null : 'none').text(d=>{ const id=d.id||d.file||''; return id.split('/').pop().replace(/\\.(ts|tsx|js|jsx|py|kt|kts|svelte)$/,''); }).attr('font-size','8px').attr('fill','#8896a8').attr('text-anchor','middle').attr('dy',d=>r(d)+9).style('pointer-events','none').style('user-select','none');
             container.addEventListener('click',()=>{ document.getElementById('graph-detail').innerHTML=''; });
             _sim = d3.forceSimulation(data.nodes)
                 .force('link',d3.forceLink(data.edges).id(d=>d.id||d.file).distance(70).strength(0.4))
