@@ -19,7 +19,8 @@ GODOT_SUMMARY_EXTS = {".tscn", ".tres", ".godot"}
 
 # ── res:// / uid:// resolution ───────────────────────────────────────────────
 
-_SECTION_RE = re.compile(r'^\[(\w+)([^\]]*)\]\s*$', re.MULTILINE)
+_SECTION_RE = re.compile(r'^\[(\w+)([^\]\n]*)\][ \t]*$', re.MULTILINE)  # single line: no cross-line backtracking
+MAX_SUMMARY_INPUT = 2_000_000  # chars; larger scenes/resources are truncated before parsing
 _ATTR_RE = re.compile(r'(\w+)=("([^"]*)"|[^\s\]]+)')
 
 
@@ -255,6 +256,7 @@ def summarize_project(text: str) -> str:
 
 
 def summarize(path: Path, text: str) -> str:
+    text = text[:MAX_SUMMARY_INPUT]
     if path.suffix == ".tscn":
         return summarize_tscn(text)
     if path.suffix == ".tres":
