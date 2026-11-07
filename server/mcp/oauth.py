@@ -309,7 +309,7 @@ body { background: #111318; color: #e2e8f0; font-family: -apple-system, BlinkMac
 .card { background: #1c2030; border: 1px solid #2d3248; border-radius: 12px; padding: 2rem; width: 100%; max-width: 360px; }
 h1 { font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #c084fc, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 1.5rem; text-align: center; }
 label { font-size: 0.8rem; color: #8896a8; display: block; margin-bottom: 0.4rem; }
-input[type=password], input[type=text] { width: 100%; background: #111318; border: 1px solid #2d3248; border-radius: 6px; color: #e2e8f0; padding: 0.6rem 0.75rem; font-size: 0.9rem; outline: none; margin-bottom: 0.9rem; }
+input[type=password], input[type=text] { width: 100%; background: #111318; border: 1px solid #2d3248; border-radius: 6px; color: #e2e8f0; padding: 0.6rem 0.75rem; font-size: 16px; outline: none; margin-bottom: 0.9rem; }
 input[type=password]:focus, input[type=text]:focus { border-color: #a78bfa; }
 button { width: 100%; margin-top: 0.2rem; background: #a78bfa; border: none; border-radius: 6px; color: #111318; font-weight: 700; padding: 0.65rem; cursor: pointer; font-size: 0.9rem; }
 button:hover { background: #c084fc; }
@@ -623,7 +623,7 @@ h1 { font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #c
 p { font-size: 0.88rem; color: #a0aec0; margin-bottom: 0.9rem; line-height: 1.45; }
 b { color: #e2e8f0; }
 label { font-size: 0.8rem; color: #8896a8; display: block; margin-bottom: 0.4rem; }
-input { width: 100%; background: #111318; border: 1px solid #2d3248; border-radius: 6px; color: #e2e8f0; padding: 0.6rem 0.75rem; font-size: 0.9rem; outline: none; margin-bottom: 0.9rem; }
+input { width: 100%; background: #111318; border: 1px solid #2d3248; border-radius: 6px; color: #e2e8f0; padding: 0.6rem 0.75rem; font-size: 16px; outline: none; margin-bottom: 0.9rem; }
 input:focus { border-color: #a78bfa; }
 button { width: 100%; background: #a78bfa; border: none; border-radius: 6px; color: #111318; font-weight: 700; padding: 0.65rem; cursor: pointer; font-size: 0.9rem; }
 button:hover { background: #c084fc; }
