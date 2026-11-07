@@ -19,7 +19,7 @@ Dashboard at `/` for search and admin operations.
 https://cortex.hyvitech.org/
 ```
 
-Auth: built-in OAuth 2.0 (Bearer token). Login at `/oauth/authorize` with `ADMIN_PASSWORD`.
+Auth: built-in OAuth 2.0 (Bearer token). Login at `/oauth/authorize` with username + password: `admin` (or blank) uses `ADMIN_PASSWORD`; members are created via single-use invite links (`/invite/{token}`). Members only get MCP + `/api/me`; every other `/api/*` is admin-only.
 
 **Features:**
 - Search tab: query notes/code, toggle collections
@@ -55,14 +55,16 @@ server/
   mcp/                  # SSE server (Docker, deployed to cortex.hyvitech.org)
     server.py           # startup only — threads, routes, middleware wiring, uvicorn
     config.py           # env vars, embed(), warmup()
-    state.py            # global mutable state, stats lifecycle, graph cache
+    state.py            # global mutable state, stats lifecycle, graph cache, per-request user/workspace contextvars
+    users.py            # users.json (0600): users (scrypt), invites (sha256, 7d, single use), shared-workspace registry
     repos.py            # repo registry persistence
     onboarding.py       # ONBOARDING_TEMPLATE + _merge_onboarding()
     reindex.py          # job queue, _run_reindex, _enqueue, _reindex_worker
     middleware.py       # _BearerTokenMiddleware, _NormalizeSSEPath
     watcher.py          # debounced watchdog for notes changes
     routes.py           # all HTTP route handlers + webhook helpers
-    tools.py            # FastMCP instance + all @mcp.tool() + @mcp.prompt()
+    tools.py            # CortexMCP (binds caller in call_tool, ADMIN_TOOLS gate) + tool registration
+    tools_users.py      # whoami + admin tools: workspaces, repos, invites, users
     web_ui.py           # API handlers — search, status, stats
     template.py         # embedded HTML/CSS/JS dashboard + LOGO_SVG
     oauth.py            # custom OAuth 2.0 AS (RFC 8414/7591/7636, PKCE S256)
@@ -101,7 +103,9 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 - `get_stats(all?)` — efficiency metrics; `all=True` shows all persisted versions side-by-side
 - `get_onboarding(existing_content?, force?)` — returns setup instructions + preferences; pass existing CLAUDE.md content to merge; `force=True` replaces stale Cortex section
 - `switch_workspace(name)` — switch active workspace (isolated Qdrant collections + repos)
-- `list_workspaces()` — list all workspaces and their index status
+- `list_workspaces()` — list the caller's workspaces and their index status
+- `whoami()` — caller, role, active workspace
+- admin only (`tools.ADMIN_TOOLS`): `clear_cache`, `get_stats`, `create_workspace(name, wiki_repo?)`, `delete_workspace`, `set_workspace_wiki`, `add_repo(repo, workspace)`, `remove_repo`, `invite_user(username, workspaces)`, `list_users`, `remove_user`, `grant_workspace`, `revoke_workspace`
 
 ## MCP prompts
 
@@ -110,7 +114,7 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 ## Key patterns
 
 - 4-layer architecture (deps flow downward only):
-  - **Foundation**: `config`, `oauth`, `template`, `onboarding` — no local deps
+  - **Foundation**: `config`, `users`, `oauth` (← users), `template`, `onboarding` — no other local deps
   - **Domain**: `state`, `repos` ← config
   - **Service**: `reindex` ← state, repos; exposes `_enqueue()`, `get_status()`, `get_queue_snapshot()` as public API
   - **Transport**: `routes` (HTTP), `tools` (MCP) ← service API only; `middleware`, `watcher` ← config/service
@@ -120,6 +124,9 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 - `_enqueue()` coalesces same-repo incremental webhook jobs (merges file lists instead of queuing duplicate)
 - Watchdog debounces 60s before triggering notes reindex (env: `WATCH_DEBOUNCE`)
 - Code indexer clones repos with `config.get_github_token()` (dashboard setting > `GITHUB_TOKEN` env), passed to the subprocess env by `reindex._workspace_env()`
+- Multi-user: never read `_active_workspace` directly — use `state.get_active_workspace()` (per-user via contextvars). Binding happens in `_BearerTokenMiddleware` (HTTP; admin `/api/*` always binds `default`), `CortexMCP.call_tool` (MCP — SSE tools run outside the POST task, so the middleware binding never reaches them), and `_reindex_worker` (each job carries `ws`). A bound user with no workspace raises `PermissionError` instead of falling back to `default`
+- `default` = admin's private workspace (vault + own repos), never grantable. Shared workspaces are code repos + optional wiki repo: notes reindex there clones the wiki (`reindex._sync_wiki`, auth via `http.extraheader`, not URL) and never reads `NOTES_PATH`
+- Webhook fans out: code job per workspace tracking the repo, notes job per workspace whose `wiki_repo` matches
 - Per-repo excludes: `core.chunker.repo_ignore_patterns()` (`.cortexignore` + `.gdignore` dirs); full reindex deletes chunks of gone/excluded files
 - Qdrant `query_points()` API (v1.17+) — `search()` is removed
 

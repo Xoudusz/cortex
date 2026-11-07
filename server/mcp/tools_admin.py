@@ -6,7 +6,9 @@ import time
 from qdrant_client import QdrantClient
 
 from config import QDRANT_URL, VERSION, collection_name
-from state import _stats, _get_code_graph_meta, _load_all_stats, get_active_workspace, set_active_workspace, _workspace_data_dir
+import users as _users
+from state import (_stats, _get_code_graph_meta, _load_all_stats, current_user, get_active_workspace,
+                   set_active_workspace, _workspace_data_dir)
 from onboarding import PROJECT_CLAUDE_MD_TEMPLATE, _merge_onboarding, _build_cortex_section
 from reindex import _enqueue, get_status, clear_cache as _clear_cache
 from repos import _load_repos
@@ -57,6 +59,11 @@ def register_admin(mcp) -> None:
         """
         s = get_status()
         q = s.get("queue_depth", 0)
+        user = current_user()
+        job_ws = (s.get("current_job") or {}).get("ws") or s.get("last_ws")
+        if user is not None and not _users.is_admin(user) and job_ws and not _users.can_access(user, job_ws):
+            # another workspace's job: don't leak its repo names / log lines to members
+            s = {**s, "output": ["(output hidden: job belongs to another workspace)"], "error": None}
         if s["started_at"] is None:
             msg = "No reindex has been run yet." + (f" {q} jobs queued." if q else "")
             if monitor and q > 0:
@@ -184,12 +191,19 @@ def register_admin(mcp) -> None:
         Use when switching between work/personal/project contexts.
         Example: switch_workspace("work")
         """
+        name = name.strip().lower()
+        if name != "default" and not _users.valid_name(name):
+            return f"Invalid workspace name '{name}'."
+        user = current_user()
+        if user is not None and not _users.can_access(user, name):
+            return f"You don't have access to workspace '{name}'. Use list_workspaces() to see yours."
         client = QdrantClient(url=QDRANT_URL)
         existing = {c.name for c in client.get_collections().collections}
         code_coll = collection_name("code", name)
         notes_coll = collection_name("notes", name)
         has_index = code_coll in existing or notes_coll in existing
-        if not has_index and name != "default":
+        registered = name in _users.list_registered()
+        if not has_index and name != "default" and not registered:
             return (
                 f"Workspace '{name}' has no indexed collections ({code_coll}, {notes_coll}).\n"
                 f"Index it first with reindex(), then switch."
@@ -211,9 +225,15 @@ def register_admin(mcp) -> None:
         """
         client = QdrantClient(url=QDRANT_URL)
         existing = {c.name for c in client.get_collections().collections}
-        active = get_active_workspace()
+        try:
+            active = get_active_workspace()
+        except PermissionError as e:
+            return str(e)
+        user = current_user()
 
         workspaces: dict = {"default": {"code": "code", "notes": "notes"}}
+        for ws in _users.list_registered():
+            workspaces[ws] = {"code": collection_name("code", ws), "notes": collection_name("notes", ws)}
         for coll in existing:
             if "_" in coll:
                 parts = coll.rsplit("_", 1)
@@ -222,6 +242,9 @@ def register_admin(mcp) -> None:
                     if ws not in workspaces:
                         workspaces[ws] = {}
                     workspaces[ws][parts[1]] = coll
+        if user is not None and not _users.is_admin(user):
+            mine = set(_users.user_workspaces(user))
+            workspaces = {k: v for k, v in workspaces.items() if k in mine}
 
         lines = [f"Active workspace: {active}\n"]
         for ws in sorted(workspaces):
@@ -235,7 +258,8 @@ def register_admin(mcp) -> None:
             if has_notes:
                 status.append("notes")
             indexed = f"indexed: {', '.join(status)}" if status else "empty"
-            lines.append(f"{marker}{ws} ({indexed})")
+            wiki = _users.get_wiki(ws) if ws != "default" else ""
+            lines.append(f"{marker}{ws} ({indexed}{', wiki ' + wiki if wiki else ''})")
         return "\n".join(lines)
 
     @mcp.tool()

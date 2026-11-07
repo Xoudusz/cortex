@@ -183,6 +183,10 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         .avail > summary::before { content: '▸'; display: inline-block; margin-right: 0.4rem; transition: transform .15s; }
         .avail[open] > summary::before { transform: rotate(90deg); }
         /* settings: connect card */
+        .chip { display: inline-flex; align-items: center; gap: 0.2rem; background: var(--bg2); border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.25rem 0.1rem 0.6rem; font-size: 0.75rem; margin: 0 0.3rem 0.3rem 0; }
+        .chip .ib { width: 20px; height: 20px; }
+        .urow { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; border-top: 1px solid var(--line); padding: 0.55rem 0; }
+        .urow b { min-width: 90px; }
         .cmd { display: flex; align-items: center; gap: 0.4rem; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 0.4rem 0.4rem 0.4rem 0.75rem; font-family: var(--mono); font-size: 0.76rem; margin: 0.5rem 0; }
         .cmd code { flex: 1; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
         /* logs */
@@ -236,6 +240,16 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             </div>
         </div>
 
+        <div id="member-view" style="display:none">
+            <div class="card">
+                <div class="card-h"><h3>Hi <span id="mv-user"></span></h3><span class="sub">you use Cortex through Claude Code</span></div>
+                <div class="hint">Your workspaces: <b id="mv-ws"></b></div>
+                <div class="cmd"><code id="mv-cmd"></code><button class="ib" id="mv-copy" title="Copy"><svg class="ico"><use href="#i-copy"/></svg></button></div>
+                <div class="hint">Run this once where Claude Code runs. The first tool call opens a browser login: use your username and password.
+                Then ask Claude to <code>list_workspaces</code>, <code>switch_workspace</code>, and search with <code>search_code</code> / <code>search_notes</code>.</div>
+            </div>
+        </div>
+
         <div class="tabs">
             <button class="tab active" data-tab="search"><svg class="ico"><use href="#i-search"/></svg>Search</button>
             <button class="tab" data-tab="repos"><svg class="ico"><use href="#i-repos"/></svg>Repos</button>
@@ -276,6 +290,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <button class="admin-tab" data-admin-tab="graph">Graph efficiency</button>
                 <button class="admin-tab" data-admin-tab="webhooks">Webhooks</button>
                 <button class="admin-tab" data-admin-tab="logs">Logs</button>
+                <button class="admin-tab" data-admin-tab="users">Users</button>
                 <button class="admin-tab" data-admin-tab="settings">Settings</button>
             </nav>
             <div>
@@ -308,6 +323,28 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             </div>
             <div id="admin-webhooks" class="admin-section">
                 <div class="card"><div class="card-h"><h3>Webhooks</h3><span class="sub">GitHub pushes that triggered a reindex</span></div><div id="webhook-log-wrap"><div class="empty">No webhooks received yet.</div></div></div>
+            </div>
+            <div id="admin-users" class="admin-section">
+                <div class="card">
+                    <div class="card-h"><h3>Shared workspaces</h3><span class="sub">own code + notes index; your vault stays private in <code>default</code></span></div>
+                    <form id="ws-create-form" style="display:flex;gap:0.5rem;flex-wrap:wrap">
+                        <input id="ws-name" placeholder="name, e.g. proj" autocomplete="off" style="flex:1;min-width:140px">
+                        <input id="ws-wiki" placeholder="wiki repo owner/name (optional)" autocomplete="off" style="flex:2;min-width:200px">
+                        <button type="submit"><svg class="ico"><use href="#i-plus"/></svg>Create</button>
+                    </form>
+                    <div class="hint" style="margin-top:0.5rem">The wiki repo is a GitHub repo of markdown files indexed as the workspace's notes; a push reindexes it (add the cortex webhook to it).</div>
+                    <div id="ws-list" style="margin-top:0.75rem"></div>
+                </div>
+                <div class="card">
+                    <div class="card-h"><h3>Users</h3><span class="sub">invite links are single use and valid 7 days</span></div>
+                    <form id="invite-form" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
+                        <input id="invite-name" placeholder="username" autocomplete="off" style="flex:1;min-width:140px">
+                        <div id="invite-ws" class="toggles" style="margin:0"></div>
+                        <button type="submit"><svg class="ico"><use href="#i-plus"/></svg>Invite</button>
+                    </form>
+                    <div id="invite-result"></div>
+                    <div id="user-list" style="margin-top:0.75rem"></div>
+                </div>
             </div>
             <div id="admin-settings" class="admin-section">
                 <div class="card">
@@ -494,6 +531,22 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             return res.json();
         }
 
+        // Members (non-admin users) only get the connect card; the dashboard API is admin-only.
+        const roleReady = (async function initRole() {
+            let me;
+            try { me = await api('/api/me'); } catch (_) { return false; }
+            if (!me) return false;
+            if (me.admin) return true;
+            document.querySelectorAll('.tabs, .panel, .hstats .hstat').forEach(el => { el.style.display = 'none'; });
+            document.getElementById('member-view').style.display = 'block';
+            document.getElementById('mv-user').textContent = me.user;
+            document.getElementById('mv-ws').textContent = (me.workspaces || []).join(', ') || 'none yet - ask the admin';
+            const cmd = 'claude mcp add cortex --transport sse ' + window.location.origin + '/sse';
+            document.getElementById('mv-cmd').textContent = cmd;
+            document.getElementById('mv-copy').addEventListener('click', () => copyText(cmd));
+            return false;
+        })();
+
         function escapeHtml(str) {
             return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
@@ -529,6 +582,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 if (tab.dataset.adminTab === 'webhooks') loadWebhookLog();
                 if (tab.dataset.adminTab === 'logs') loadLogs();
                 if (tab.dataset.adminTab === 'settings') loadTokenStatus();
+                if (tab.dataset.adminTab === 'users') loadUsersPanel();
             });
         });
 
@@ -538,8 +592,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             document.getElementById('status-label').textContent = data.running ? ('indexing ' + jobLabel(data.current_job) + (q ? ' +' + q + ' queued' : '')) : (q ? q + ' queued' : 'idle');
         }
         async function pollStatusDot() { try { const data = await api('/api/status'); statusDot.classList.toggle('active', !!data.running); setStatusLabel(data); if ((data.running || (data.queue && data.queue.length)) && !statusPoll) pollStatus(); } catch (_) {} }
-        pollStatusDot();
-        setInterval(pollStatusDot, 5000);
+        roleReady.then(isAdmin => { if (isAdmin) { pollStatusDot(); setInterval(pollStatusDot, 5000); } });
 
         const searchForm = document.getElementById('search-form');
         const queryInput = document.getElementById('query');
@@ -558,8 +611,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 repoFilterSelect.innerHTML = '<option value="">All repos</option>' + indexed.map(n => '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>').join('');
             } catch (_) {}
         }
-        loadRepoFilter();
-        loadStats();
+        roleReady.then(isAdmin => { if (isAdmin) { loadRepoFilter(); loadStats(); } });
 
         searchForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -921,6 +973,116 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             localStorage.removeItem('cortex_refresh');
             oauthStarted = false;
             startOAuthFlow();
+        });
+
+        // ---- Users & shared workspaces (admin) ----
+        const enc = encodeURIComponent;
+        let _wsNames = [];
+        async function loadUsersPanel() {
+            try {
+                const [w, u] = await Promise.all([api('/api/workspaces'), api('/api/users')]);
+                if (!w || !u) return;
+                renderWorkspaces(w.workspaces || []);
+                renderUsers(u.users || [], u.invites || []);
+            } catch (err) { toast(err.message, 'error'); }
+        }
+        function renderWorkspaces(list) {
+            _wsNames = list.map(w => w.name);
+            document.getElementById('invite-ws').innerHTML = _wsNames.length
+                ? _wsNames.map(n => '<label class="toggle"><input type="checkbox" value="' + escapeHtml(n) + '"><span>' + escapeHtml(n) + '</span></label>').join('')
+                : '<span class="hint">create a workspace first</span>';
+            const el = document.getElementById('ws-list');
+            if (!list.length) { el.innerHTML = '<div class="empty">No shared workspaces yet.</div>'; return; }
+            el.innerHTML = list.map(w => {
+                const n = escapeHtml(w.name);
+                const repos = (w.repos || []).map(r => {
+                    const err = (w.errors || {})[r.split('/')[1]];
+                    const ok = (w.indexed_at || {})[r.split('/')[1]];
+                    const title = err ? escapeHtml(err) : (ok ? 'indexed ' + timeAgo(ok) : 'not indexed yet');
+                    return '<span class="chip" title="' + title + '">' + (err ? '! ' : '') + escapeHtml(r) +
+                        '<button class="ib ws-repo-rm" data-repo="' + escapeHtml(r) + '" title="Remove"><svg class="ico"><use href="#i-trash"/></svg></button></span>';
+                }).join('') || '<span class="hint">no code repos</span>';
+                return '<div class="card" style="margin-bottom:0.5rem;background:var(--bg2)" data-ws="' + n + '">' +
+                    '<div class="card-h"><h3>' + n + '</h3><span class="sub">members: ' + escapeHtml((w.members || []).join(', ') || 'none') + '</span>' +
+                    '<span class="push"><button class="secondary small ws-reindex">Reindex</button>' +
+                    '<button class="ib ws-del" title="Delete workspace"><svg class="ico"><use href="#i-trash"/></svg></button></span></div>' +
+                    '<form class="ws-wiki-form" style="display:flex;gap:0.4rem;margin-bottom:0.5rem;align-items:center"><span class="hint">wiki</span>' +
+                    '<input value="' + escapeHtml(w.wiki_repo || '') + '" placeholder="owner/name (notes)" style="flex:1"><button type="submit" class="secondary small">Save</button></form>' +
+                    '<div>' + repos + '</div>' +
+                    '<form class="ws-repo-add" style="display:flex;gap:0.4rem;margin-top:0.4rem"><input placeholder="add code repo owner/name" style="flex:1">' +
+                    '<button type="submit" class="secondary small">Add</button></form></div>';
+            }).join('');
+        }
+        function renderUsers(users, invites) {
+            const el = document.getElementById('user-list');
+            let html = users.map(u => {
+                const name = escapeHtml(u.username);
+                if (u.admin) return '<div class="urow"><b>' + name + '</b><span class="hint">admin, all workspaces</span></div>';
+                const chips = (u.workspaces || []).map(w => '<span class="chip">' + escapeHtml(w) +
+                    '<button class="ib u-revoke" data-user="' + name + '" data-ws="' + escapeHtml(w) + '" title="Revoke"><svg class="ico"><use href="#i-trash"/></svg></button></span>').join('');
+                const grantable = _wsNames.filter(w => !(u.workspaces || []).includes(w));
+                const grant = grantable.length ? '<select class="u-grant-sel" data-user="' + name + '"><option value="">+ workspace</option>' +
+                    grantable.map(w => '<option>' + escapeHtml(w) + '</option>').join('') + '</select>' : '';
+                return '<div class="urow"><b>' + name + '</b><span>' + (chips || '<span class="hint">no workspaces</span>') + '</span>' + grant +
+                    '<span style="margin-left:auto"><button class="ib u-del" data-user="' + name + '" title="Remove user"><svg class="ico"><use href="#i-trash"/></svg></button></span></div>';
+            }).join('');
+            html += invites.map(i => '<div class="urow"><b>' + escapeHtml(i.username) + '</b><span class="hint">invite pending (' +
+                escapeHtml((i.workspaces || []).join(', ') || 'no workspaces') + '), expires ' + escapeHtml(i.expires_at.slice(0, 10)) + '</span>' +
+                '<span style="margin-left:auto"><button class="ib u-del" data-user="' + escapeHtml(i.username) + '" title="Cancel invite"><svg class="ico"><use href="#i-trash"/></svg></button></span></div>').join('');
+            el.innerHTML = html;
+        }
+        async function usersAction(fn, okMsg) {
+            try { const r = await fn(); if (r === undefined) return; if (okMsg) toast(okMsg); loadUsersPanel(); }
+            catch (err) { toast(err.message, 'error'); }
+        }
+        document.getElementById('ws-create-form').addEventListener('submit', e => {
+            e.preventDefault();
+            const name = document.getElementById('ws-name').value.trim(), wiki = document.getElementById('ws-wiki').value.trim();
+            usersAction(() => api('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, wiki_repo: wiki }) }), 'Workspace ' + name + ' created');
+            document.getElementById('ws-name').value = ''; document.getElementById('ws-wiki').value = '';
+        });
+        document.getElementById('ws-list').addEventListener('click', async e => {
+            const card = e.target.closest('[data-ws]'); if (!card) return;
+            const ws = card.dataset.ws;
+            if (e.target.closest('.ws-reindex')) usersAction(() => api('/api/workspaces/' + enc(ws) + '/reindex', { method: 'POST', body: JSON.stringify({ notes: true, code: true }) }), 'Reindex queued for ' + ws);
+            const rm = e.target.closest('.ws-repo-rm');
+            if (rm && await confirmDialog('Stop tracking ' + rm.dataset.repo + ' in ' + ws + '?', 'Remove'))
+                usersAction(() => api('/api/workspaces/' + enc(ws) + '/repos/' + rm.dataset.repo, { method: 'DELETE' }), 'Removed');
+            if (e.target.closest('.ws-del') && await confirmDialog('Delete workspace ' + ws + '? Members lose access; indexed data stays on disk.', 'Delete'))
+                usersAction(() => api('/api/workspaces/' + enc(ws), { method: 'DELETE' }), 'Workspace deleted');
+        });
+        document.getElementById('ws-list').addEventListener('submit', e => {
+            e.preventDefault();
+            const card = e.target.closest('[data-ws]'); const ws = card.dataset.ws; const val = e.target.querySelector('input').value.trim();
+            if (e.target.classList.contains('ws-wiki-form'))
+                usersAction(() => api('/api/workspaces/' + enc(ws), { method: 'PUT', body: JSON.stringify({ wiki_repo: val }) }), 'Wiki saved. Reindex to pick it up.');
+            if (e.target.classList.contains('ws-repo-add'))
+                usersAction(() => api('/api/workspaces/' + enc(ws) + '/repos', { method: 'POST', body: JSON.stringify({ repo: val }) }), 'Added ' + val);
+        });
+        document.getElementById('invite-form').addEventListener('submit', async e => {
+            e.preventDefault();
+            const username = document.getElementById('invite-name').value.trim();
+            const workspaces = [...document.querySelectorAll('#invite-ws input:checked')].map(c => c.value);
+            try {
+                const r = await api('/api/invites', { method: 'POST', body: JSON.stringify({ username, workspaces }) });
+                if (!r) return;
+                document.getElementById('invite-result').innerHTML = '<div class="hint" style="margin-top:0.6rem">Send this link to ' + escapeHtml(username) +
+                    ' (shown once, single use, ' + r.expires_in_days + ' days):</div><div class="cmd"><code>' + escapeHtml(r.link) +
+                    '</code><button class="ib" data-copy="' + escapeHtml(r.link) + '" title="Copy"><svg class="ico"><use href="#i-copy"/></svg></button></div>';
+                document.getElementById('invite-name').value = '';
+                loadUsersPanel();
+            } catch (err) { toast(err.message, 'error'); }
+        });
+        document.getElementById('user-list').addEventListener('click', async e => {
+            const rv = e.target.closest('.u-revoke');
+            if (rv) usersAction(() => api('/api/users/' + enc(rv.dataset.user) + '/workspaces', { method: 'DELETE', body: JSON.stringify({ workspace: rv.dataset.ws }) }), 'Access revoked');
+            const del = e.target.closest('.u-del');
+            if (del && await confirmDialog('Remove ' + del.dataset.user + '? Their logins stop working immediately.', 'Remove'))
+                usersAction(() => api('/api/users/' + enc(del.dataset.user), { method: 'DELETE' }), 'Removed ' + del.dataset.user);
+        });
+        document.getElementById('user-list').addEventListener('change', e => {
+            const sel = e.target.closest('.u-grant-sel'); if (!sel || !sel.value) return;
+            usersAction(() => api('/api/users/' + enc(sel.dataset.user) + '/workspaces', { method: 'POST', body: JSON.stringify({ workspace: sel.value }) }), 'Access granted');
         });
 
         const GRAPH_COLORS = ['#a78bfa','#34d399','#f87171','#fbbf24','#60a5fa','#f472b6','#4ade80','#fb923c','#38bdf8','#e879f9'];
