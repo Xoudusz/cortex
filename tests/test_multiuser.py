@@ -248,35 +248,53 @@ def test_throttle_per_username_slows_but_never_locks_out():
     oauth._fails.clear()
 
 
-def test_slowed_logins_are_serialized_per_user():
-    """Parallel attempts against one slowed user must run one after another, not side by side."""
+def _slowed_attempts(username: str, ips: list) -> tuple:
+    """Fire parallel login attempts for a slowed username; return (statuses, elapsed seconds)."""
     import time as _t
     oauth._fails.clear()
-    users.create_workspace("ws-serial")
+    oauth._user_locks.clear()
     for i in range(oauth._FAIL_LIMITS["user"]):
-        oauth._record_fail(f"10.1.0.{i}", "admin")
+        oauth._record_fail(f"10.1.0.{i}", username)
     saved = oauth._USER_DELAY
-    oauth._USER_DELAY = 0.2
-
-    async def attempt(i):
-        form = {"username": "admin", "password": "wrong", "client_id": "c", "redirect_uri": "https://e/cb",
-                "code_challenge": "x", "code_challenge_method": "S256", "state": ""}
-        req = SimpleNamespace(form=lambda: _aw(form), client=SimpleNamespace(host=f"8.8.{i}.1"), headers=Headers({}))
-        return await oauth.authorize_post(req)
+    oauth._USER_DELAY = 0.3
 
     async def _aw(v):
         return v
 
+    async def attempt(ip):
+        form = {"username": username, "password": "wrong", "client_id": "c", "redirect_uri": "https://e/cb",
+                "code_challenge": "x", "code_challenge_method": "S256", "state": ""}
+        req = SimpleNamespace(form=lambda: _aw(form), client=SimpleNamespace(host=ip), headers=Headers({}))
+        return (await oauth.authorize_post(req)).status_code
+
     async def main():
-        return await asyncio.gather(*(attempt(i) for i in range(3)))
+        return await asyncio.gather(*(attempt(ip) for ip in ips))
 
     t0 = _t.time()
-    asyncio.run(main())
-    elapsed = _t.time() - t0
-    oauth._USER_DELAY = saved
-    oauth._fails.clear()
-    oauth._user_locks.clear()
-    assert elapsed >= 0.6, f"attempts ran in parallel ({elapsed:.2f}s)"
+    try:
+        statuses = asyncio.run(main())
+    finally:
+        oauth._USER_DELAY = saved
+        oauth._fails.clear()
+        oauth._user_locks.clear()
+    return statuses, _t.time() - t0
+
+
+def test_parallel_attempts_same_ip_get_429_not_a_queue():
+    statuses, elapsed = _slowed_attempts("admin", ["8.8.1.1"] * 3)
+    assert sorted(statuses) == [400, 429, 429], statuses  # one runs (wrong pw), the rest rejected at once
+    assert elapsed < 0.9, f"attempts queued ({elapsed:.2f}s)"
+
+
+def test_attacker_ip_does_not_delay_other_ips():
+    statuses, elapsed = _slowed_attempts("admin", ["8.8.1.1", "8.8.2.2"])
+    assert statuses == [400, 400], statuses
+    assert elapsed < 0.6, f"second IP waited behind the first ({elapsed:.2f}s)"
+
+
+def test_unknown_user_gets_same_delay():
+    _, elapsed = _slowed_attempts("nobody-here", ["8.8.3.3"])
+    assert elapsed >= 0.3, f"unknown user skipped the delay ({elapsed:.2f}s)"
 
 
 def test_untrusted_private_peer_cannot_spoof_when_proxies_pinned():

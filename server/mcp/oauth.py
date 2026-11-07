@@ -203,7 +203,10 @@ def _user_slowed(username: str) -> bool:
 
 
 _USER_DELAY_MAX = 30.0
-_user_locks: dict = {}  # username -> asyncio.Lock; only created for existing users
+# (username, ip) -> asyncio.Lock. Keyed per IP so an attacker's traffic never queues the real user's
+# attempts; a busy lock means 429, never waiting. Entries only exist for usernames past the per-user
+# limit, which the per-IP hard limit bounds.
+_user_locks: dict = {}
 
 
 def _user_delay(username: str) -> float:
@@ -480,10 +483,14 @@ async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | 
     if _throttled(ip, username):
         log.warning("[oauth] login throttled for %s", ip)
         return bad("Too many failed attempts. Try again in 15 minutes.", 429)
-    if _user_slowed(username) and _users.exists(username):
-        # Serialize: one attempt at a time per user, each after a growing delay — parallel requests
-        # can't multiply the guess rate, and the real user still gets in with the right password.
-        async with _user_locks.setdefault(username, asyncio.Lock()):
+    if _user_slowed(username):
+        # Same path for existing and unknown usernames (no timing oracle). One attempt at a time per
+        # (user, IP), each after a growing delay; a second parallel attempt from that IP gets 429 instead
+        # of queueing, so nobody's traffic can make the real user wait behind it.
+        lock = _user_locks.setdefault((username, ip), asyncio.Lock())
+        if lock.locked():
+            return bad("Too many failed attempts. Try again in a minute.", 429)
+        async with lock:
             await asyncio.sleep(_user_delay(username))
             ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
     else:
