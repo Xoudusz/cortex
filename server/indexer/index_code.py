@@ -12,7 +12,7 @@ import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelector, MatchValue, PointStruct, SparseVector, SparseVectorParams, VectorParams
 
-from chunker import chunk_file, CODE_EXTS, SKIP_DIRS, REPOS_DIR, _is_excluded, repo_ignore_patterns
+from chunker import chunk_file, CODE_EXTS, SKIP_DIRS, REPOS_DIR, _is_excluded, repo_ignore_patterns, is_safe_file
 from cache import load_cache, save_cache
 import roslyn_analyzer
 
@@ -215,7 +215,7 @@ def main():
                         print(f"  warn: delete {rel}: {e}", flush=True)
             code_files = [
                 repo_path / f for f in (args.files or [])
-                if (repo_path / f).exists() and Path(f).suffix in CODE_EXTS
+                if is_safe_file(repo_path / f, repo_path) and Path(f).suffix in CODE_EXTS
                 and not any(s in Path(f).parts for s in SKIP_DIRS)
                 and not _is_excluded(Path(f).as_posix(), excludes)
             ]
@@ -223,7 +223,7 @@ def main():
         else:
             code_files = [
                 p for p in repo_path.rglob("*")
-                if p.is_file() and p.suffix in CODE_EXTS
+                if is_safe_file(p, repo_path) and p.suffix in CODE_EXTS
                 and not any(s in p.parts for s in SKIP_DIRS)
                 and not _is_excluded(p.relative_to(repo_path).as_posix(), excludes)
             ]
@@ -309,7 +309,7 @@ def main():
         ) if not incremental else set(
             str(p.relative_to(repo_path))
             for p in repo_path.rglob("*")
-            if p.is_file() and p.suffix in CODE_EXTS
+            if is_safe_file(p, repo_path) and p.suffix in CODE_EXTS
             and not any(s in p.parts for s in SKIP_DIRS)
             and not _is_excluded(p.relative_to(repo_path).as_posix(), excludes)
         )

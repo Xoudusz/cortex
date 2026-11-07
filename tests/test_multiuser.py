@@ -209,6 +209,40 @@ def test_git_auth_header_keeps_token_out_of_url():
     assert reindex._git_auth_args("") == []
 
 
+def test_indexers_skip_symlinks_out_of_root():
+    from pathlib import Path
+    from chunker import is_safe_file
+    root = Path(tempfile.mkdtemp())
+    secret_dir = Path(tempfile.mkdtemp())
+    (secret_dir / "users.md").write_text("secret")
+    (root / "ok.md").write_text("fine")
+    (root / "leak.md").symlink_to(secret_dir / "users.md")
+    (root / "dirlink").symlink_to(secret_dir, target_is_directory=True)
+    assert is_safe_file(root / "ok.md", root)
+    assert not is_safe_file(root / "leak.md", root)
+    assert not is_safe_file(root / "dirlink" / "users.md", root)  # file reached through a symlinked dir
+    assert not is_safe_file(root / "missing.md", root)
+
+
+def test_throttle_ignores_spoofed_forwarded_for():
+    def req(peer, xff=""):
+        h = {"x-forwarded-for": xff} if xff else {}
+        return SimpleNamespace(client=SimpleNamespace(host=peer), headers=Headers(h))
+    # (public peer: 8.8.8.8 — Python counts the RFC 5737 documentation ranges as is_private)
+    assert oauth._client_ip(req("8.8.8.8", "1.1.1.1")) == "8.8.8.8"  # direct client can't spoof
+    assert oauth._client_ip(req("172.18.0.5", "6.6.6.6, 198.51.100.7")) == "198.51.100.7"  # rightmost hop from proxy
+    assert oauth._client_ip(req("127.0.0.1")) == "127.0.0.1"
+
+
+def test_throttle_per_username_across_ips():
+    oauth._fails.clear()
+    for i in range(oauth._FAIL_LIMITS["user"]):
+        oauth._record_fail(f"198.51.100.{i}", "admin")
+    assert oauth._throttled("203.0.113.1", "admin")  # fresh IP, same target user
+    assert not oauth._throttled("203.0.113.1", "bob")
+    oauth._fails.clear()
+
+
 if __name__ == "__main__":
     import traceback
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]

@@ -65,7 +65,9 @@ def _sync_wiki(ws: str, repo: str) -> Path | None:
     dest = _workspace_data_dir(ws) / "wiki"
     url = f"https://github.com/{repo}.git"
     token, _ = get_github_token()
-    auth = _git_auth_args(token)
+    # core.symlinks=false: a committed symlink is checked out as a plain text file (defence in depth;
+    # the indexers also skip symlinks / paths resolving outside the root via chunker.is_safe_file)
+    auth = _git_auth_args(token) + ["-c", "core.symlinks=false"]
     if dest.exists():
         cur = subprocess.run(["git", "-C", str(dest), "remote", "get-url", "origin"],
                              capture_output=True, text=True).stdout.strip()
@@ -74,7 +76,7 @@ def _sync_wiki(ws: str, repo: str) -> Path | None:
     if dest.exists():
         _out("wiki", f"updating {repo}...")
         steps = [["git", *auth, "-C", str(dest), "fetch", "--depth=1", "origin"],
-                 ["git", "-C", str(dest), "reset", "--hard", "FETCH_HEAD"]]
+                 ["git", "-c", "core.symlinks=false", "-C", str(dest), "reset", "--hard", "FETCH_HEAD"]]
     else:
         _out("wiki", f"cloning {repo} (shallow)...")
         dest.parent.mkdir(parents=True, exist_ok=True)

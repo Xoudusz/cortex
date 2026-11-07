@@ -13,6 +13,7 @@ import base64
 import hashlib
 import html
 import httpx
+import ipaddress
 import json
 import logging
 import os
@@ -144,30 +145,53 @@ def revoke_user_tokens(username: str) -> int:
     return n
 
 
-# --- failed-login throttle (per client IP, in memory) ---
+# --- failed-login throttle (in memory): per client IP and per username ---
 _FAIL_WINDOW = 15 * 60
-_FAIL_MAX = 10
+_FAIL_LIMITS = {"ip": 10, "user": 30}  # per-user is higher so a stranger can't trivially lock the admin out
 _fails: dict = {}
 _fails_lock = threading.Lock()
 
 
 def _client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for", "")
-    return fwd.split(",")[0].strip() or request.headers.get("x-real-ip", "") or (
-        request.client.host if request.client else "?")
+    """Client address for throttling. Forwarding headers are only trusted when the direct peer is a
+    private/loopback reverse proxy, and then only the rightmost X-Forwarded-For hop (the one our
+    proxy appended) is used — the leftmost entries are whatever the client chose to send."""
+    peer = request.client.host if request.client else ""
+    try:
+        addr = ipaddress.ip_address(peer)
+        via_proxy = addr.is_private or addr.is_loopback
+    except ValueError:
+        via_proxy = False
+    if via_proxy:
+        hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        if hops:
+            return hops[-1]
+        real = request.headers.get("x-real-ip", "").strip()
+        if real:
+            return real
+    return peer or "?"
 
 
-def _throttled(ip: str) -> bool:
+def _fail_keys(ip: str, username: str) -> list:
+    return [("ip", ip), ("user", username)]
+
+
+def _throttled(ip: str, username: str) -> bool:
     now = time.time()
     with _fails_lock:
-        recent = [t for t in _fails.get(ip, []) if now - t < _FAIL_WINDOW]
-        _fails[ip] = recent
-        return len(recent) >= _FAIL_MAX
+        for key in _fail_keys(ip, username):
+            recent = [t for t in _fails.get(key, []) if now - t < _FAIL_WINDOW]
+            _fails[key] = recent
+            if len(recent) >= _FAIL_LIMITS[key[0]]:
+                return True
+    return False
 
 
-def _record_fail(ip: str) -> None:
+def _record_fail(ip: str, username: str) -> None:
+    now = time.time()
     with _fails_lock:
-        _fails.setdefault(ip, []).append(time.time())
+        for key in _fail_keys(ip, username):
+            _fails.setdefault(key, []).append(now)
 
 
 def _pkce_verify(verifier: str, challenge: str) -> bool:
@@ -426,13 +450,13 @@ async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | 
         return bad("Auth not configured — set ADMIN_PASSWORD env var")
 
     ip = _client_ip(request)
-    if _throttled(ip):
+    if _throttled(ip, username):
         log.warning("[oauth] login throttled for %s", ip)
         return bad("Too many failed attempts. Try again in 15 minutes.", 429)
 
     ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
     if not ok:
-        _record_fail(ip)
+        _record_fail(ip, username)
         log.warning("[oauth] failed login for %r from %s", username[:40], ip)
         return bad("Incorrect username or password")  # generic: don't reveal which part was wrong
 

@@ -51,6 +51,19 @@ LANG_MAP = {
     ".gdshader": "gdshader", ".dialogue": "dialogue",
 }
 
+def is_safe_file(path: Path, root: Path) -> bool:
+    """True for a regular file that is not a symlink and resolves inside root.
+
+    Repos and wiki repos can be pushed to by other people: a committed symlink (or symlinked
+    directory) pointing at e.g. /app/data/users.json or the owner's vault must never be indexed.
+    """
+    try:
+        return (not path.is_symlink() and path.is_file()
+                and path.resolve().is_relative_to(root.resolve()))
+    except OSError:
+        return False
+
+
 def _is_excluded(rel: str, patterns: list) -> bool:
     return any(fnmatch.fnmatch(rel, p) for p in patterns)
 
@@ -64,6 +77,8 @@ def repo_ignore_patterns(root: Path) -> list:
     """
     pats: list = []
     ci = root / ".cortexignore"
+    if ci.is_symlink():
+        return pats
     if ci.is_file():
         for line in ci.read_text(encoding="utf-8", errors="replace").splitlines():
             line = line.strip()
