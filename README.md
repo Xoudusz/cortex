@@ -183,7 +183,7 @@ Share a project with a few people without exposing your own notes or repos. No d
 
 - `default` is yours alone: your vault and your repos. It can't be shared.
 - A **shared workspace** has its own code repos and, optionally, a **wiki repo**: a GitHub repo of markdown files indexed as that workspace's notes. Everyone who can push to it edits the wiki. Add the cortex webhook to the wiki repo so pushes reindex it.
-- **Invite links**: single use, valid 7 days, only a hash is stored. The invited person picks their own password (scrypt, OWASP parameters). Login errors are generic and failed logins are throttled per IP and per username. Indexers skip symlinks, so a pushed symlink can't pull server files into a shared index.
+- **Invite links**: single use, valid 7 days, only a hash is stored. The invited person picks their own password (scrypt, OWASP parameters). Login errors are generic. Failed logins are blocked per IP (10 per 15 min) and slowed per username, never locked: someone failing on purpose can't lock you out. Set `TRUSTED_PROXIES` to your reverse proxy's address so clients can't fake their IP via `X-Forwarded-For`. Indexers skip symlinks, so a pushed symlink can't pull server files into a shared index.
 - **Members** use Cortex through Claude Code only. They see and search only their granted workspaces, can switch between them and reindex them. The dashboard shows them a connect card; the dashboard API is admin-only.
 - Removing a user revokes their logins immediately.
 

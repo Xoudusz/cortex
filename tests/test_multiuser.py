@@ -234,13 +234,26 @@ def test_throttle_ignores_spoofed_forwarded_for():
     assert oauth._client_ip(req("127.0.0.1")) == "127.0.0.1"
 
 
-def test_throttle_per_username_across_ips():
+def test_throttle_per_username_slows_but_never_locks_out():
     oauth._fails.clear()
     for i in range(oauth._FAIL_LIMITS["user"]):
         oauth._record_fail(f"198.51.100.{i}", "admin")
-    assert oauth._throttled("203.0.113.1", "admin")  # fresh IP, same target user
-    assert not oauth._throttled("203.0.113.1", "bob")
+    assert oauth._user_slowed("admin")  # distributed guessing gets slowed down...
+    assert not oauth._throttled("8.8.4.4", "admin")  # ...but the real admin from a fresh IP isn't blocked
+    assert not oauth._user_slowed("bob")
     oauth._fails.clear()
+
+
+def test_untrusted_private_peer_cannot_spoof_when_proxies_pinned():
+    saved = oauth.TRUSTED_PROXIES
+    oauth.TRUSTED_PROXIES = [__import__("ipaddress").ip_network("172.18.0.2/32")]
+    try:
+        r = SimpleNamespace(client=SimpleNamespace(host="192.168.68.50"), headers=Headers({"x-forwarded-for": "1.2.3.4"}))
+        assert oauth._client_ip(r) == "192.168.68.50"
+        r = SimpleNamespace(client=SimpleNamespace(host="172.18.0.2"), headers=Headers({"x-forwarded-for": "1.2.3.4"}))
+        assert oauth._client_ip(r) == "1.2.3.4"
+    finally:
+        oauth.TRUSTED_PROXIES = saved
 
 
 if __name__ == "__main__":

@@ -142,6 +142,7 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 | `GITHUB_TOKEN` | — | For cloning private repos |
 | `WEBHOOK_SECRET` | — | GitHub webhook signature secret |
 | `ADMIN_PASSWORD` | — | OAuth login password (required if auth enabled) |
+| `TRUSTED_PROXIES` | private + loopback ranges | CIDRs allowed to set `X-Forwarded-For` (login throttle uses its rightmost hop); pin to the reverse proxy's address |
 | `BASE_URL` | `http://localhost:8765` | Public URL for OAuth metadata |
 
 ## Local mode config (~/.cortex/config.toml)

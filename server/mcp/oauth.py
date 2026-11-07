@@ -9,6 +9,7 @@ Implements:
 Every issued code/token records the "user" it belongs to. Tokens issued before multi-user
 support carry no user and are treated as the admin's, so nobody has to log in again.
 """
+import asyncio
 import base64
 import hashlib
 import html
@@ -145,30 +146,36 @@ def revoke_user_tokens(username: str) -> int:
     return n
 
 
-# --- failed-login throttle (in memory): per client IP and per username ---
+# --- failed-login throttle (in memory) ---
+# Per client IP: hard block. Per username: only a delay — a hard per-user block would let anyone lock
+# the admin out by failing on purpose; the delay still caps distributed guessing at ~1 try / 3 s.
 _FAIL_WINDOW = 15 * 60
-_FAIL_LIMITS = {"ip": 10, "user": 30}  # per-user is higher so a stranger can't trivially lock the admin out
+_FAIL_LIMITS = {"ip": 10, "user": 30}
+_USER_DELAY = 3.0
 _fails: dict = {}
 _fails_lock = threading.Lock()
 
+# Peers allowed to set X-Forwarded-For (the reverse proxy). Override with TRUSTED_PROXIES (comma-separated
+# CIDRs), ideally the proxy's exact address/subnet so LAN clients hitting the port directly can't spoof it.
+TRUSTED_PROXIES = [ipaddress.ip_network(c.strip(), strict=False) for c in (
+    os.environ.get("TRUSTED_PROXIES") or "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+).split(",") if c.strip()]
+
 
 def _client_ip(request: Request) -> str:
-    """Client address for throttling. Forwarding headers are only trusted when the direct peer is a
-    private/loopback reverse proxy, and then only the rightmost X-Forwarded-For hop (the one our
-    proxy appended) is used — the leftmost entries are whatever the client chose to send."""
+    """Client address for throttling. X-Forwarded-For is only honoured when the direct peer is a
+    trusted proxy, and then only its rightmost hop (the one our proxy appended) — the leftmost
+    entries are whatever the client chose to send."""
     peer = request.client.host if request.client else ""
     try:
         addr = ipaddress.ip_address(peer)
-        via_proxy = addr.is_private or addr.is_loopback
+        trusted = any(addr in net for net in TRUSTED_PROXIES)
     except ValueError:
-        via_proxy = False
-    if via_proxy:
+        trusted = False
+    if trusted:
         hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
         if hops:
             return hops[-1]
-        real = request.headers.get("x-real-ip", "").strip()
-        if real:
-            return real
     return peer or "?"
 
 
@@ -176,15 +183,23 @@ def _fail_keys(ip: str, username: str) -> list:
     return [("ip", ip), ("user", username)]
 
 
-def _throttled(ip: str, username: str) -> bool:
+def _over_limit(kind: str, value: str) -> bool:
     now = time.time()
+    key = (kind, value)
     with _fails_lock:
-        for key in _fail_keys(ip, username):
-            recent = [t for t in _fails.get(key, []) if now - t < _FAIL_WINDOW]
-            _fails[key] = recent
-            if len(recent) >= _FAIL_LIMITS[key[0]]:
-                return True
-    return False
+        recent = [t for t in _fails.get(key, []) if now - t < _FAIL_WINDOW]
+        _fails[key] = recent
+        return len(recent) >= _FAIL_LIMITS[kind]
+
+
+def _throttled(ip: str, username: str) -> bool:
+    """Hard block: only the per-IP bucket."""
+    return _over_limit("ip", ip)
+
+
+def _user_slowed(username: str) -> bool:
+    """Per-username bucket full: slow the attempt down, but still let the right password in."""
+    return _over_limit("user", username)
 
 
 def _record_fail(ip: str, username: str) -> None:
@@ -453,6 +468,8 @@ async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | 
     if _throttled(ip, username):
         log.warning("[oauth] login throttled for %s", ip)
         return bad("Too many failed attempts. Try again in 15 minutes.", 429)
+    if _user_slowed(username):
+        await asyncio.sleep(_USER_DELAY)
 
     ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
     if not ok:
