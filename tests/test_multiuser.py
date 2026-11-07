@@ -241,7 +241,42 @@ def test_throttle_per_username_slows_but_never_locks_out():
     assert oauth._user_slowed("admin")  # distributed guessing gets slowed down...
     assert not oauth._throttled("8.8.4.4", "admin")  # ...but the real admin from a fresh IP isn't blocked
     assert not oauth._user_slowed("bob")
+    assert oauth._user_delay("admin") == 3.0
+    for i in range(40):
+        oauth._record_fail("9.9.9.9", "admin")
+    assert oauth._user_delay("admin") == 30.0  # 3 * 2**4 = 48 -> capped
     oauth._fails.clear()
+
+
+def test_slowed_logins_are_serialized_per_user():
+    """Parallel attempts against one slowed user must run one after another, not side by side."""
+    import time as _t
+    oauth._fails.clear()
+    users.create_workspace("ws-serial")
+    for i in range(oauth._FAIL_LIMITS["user"]):
+        oauth._record_fail(f"10.1.0.{i}", "admin")
+    saved = oauth._USER_DELAY
+    oauth._USER_DELAY = 0.2
+
+    async def attempt(i):
+        form = {"username": "admin", "password": "wrong", "client_id": "c", "redirect_uri": "https://e/cb",
+                "code_challenge": "x", "code_challenge_method": "S256", "state": ""}
+        req = SimpleNamespace(form=lambda: _aw(form), client=SimpleNamespace(host=f"8.8.{i}.1"), headers=Headers({}))
+        return await oauth.authorize_post(req)
+
+    async def _aw(v):
+        return v
+
+    async def main():
+        return await asyncio.gather(*(attempt(i) for i in range(3)))
+
+    t0 = _t.time()
+    asyncio.run(main())
+    elapsed = _t.time() - t0
+    oauth._USER_DELAY = saved
+    oauth._fails.clear()
+    oauth._user_locks.clear()
+    assert elapsed >= 0.6, f"attempts ran in parallel ({elapsed:.2f}s)"
 
 
 def test_untrusted_private_peer_cannot_spoof_when_proxies_pinned():

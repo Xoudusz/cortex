@@ -202,6 +202,18 @@ def _user_slowed(username: str) -> bool:
     return _over_limit("user", username)
 
 
+_USER_DELAY_MAX = 30.0
+_user_locks: dict = {}  # username -> asyncio.Lock; only created for existing users
+
+
+def _user_delay(username: str) -> float:
+    """3 s at the limit, doubling every 10 further failures, capped at 30 s."""
+    with _fails_lock:
+        n = len(_fails.get(("user", username), []))
+    extra = max(0, n - _FAIL_LIMITS["user"]) // 10
+    return min(_USER_DELAY_MAX, _USER_DELAY * (2 ** extra))
+
+
 def _record_fail(ip: str, username: str) -> None:
     now = time.time()
     with _fails_lock:
@@ -468,10 +480,14 @@ async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | 
     if _throttled(ip, username):
         log.warning("[oauth] login throttled for %s", ip)
         return bad("Too many failed attempts. Try again in 15 minutes.", 429)
-    if _user_slowed(username):
-        await asyncio.sleep(_USER_DELAY)
-
-    ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
+    if _user_slowed(username) and _users.exists(username):
+        # Serialize: one attempt at a time per user, each after a growing delay — parallel requests
+        # can't multiply the guess rate, and the real user still gets in with the right password.
+        async with _user_locks.setdefault(username, asyncio.Lock()):
+            await asyncio.sleep(_user_delay(username))
+            ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
+    else:
+        ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
     if not ok:
         _record_fail(ip, username)
         log.warning("[oauth] failed login for %r from %s", username[:40], ip)
