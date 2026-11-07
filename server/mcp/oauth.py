@@ -203,7 +203,10 @@ def _user_slowed(username: str) -> bool:
 
 
 _USER_DELAY_MAX = 30.0
-_user_locks: dict = {}  # username -> asyncio.Lock; only created for existing users
+# (username, ip) -> asyncio.Lock. Keyed per IP so an attacker's traffic never queues the real user's
+# attempts; a busy lock means 429, never waiting. Entries only exist for usernames past the per-user
+# limit, which the per-IP hard limit bounds.
+_user_locks: dict = {}
 
 
 def _user_delay(username: str) -> float:
@@ -306,7 +309,7 @@ body { background: #111318; color: #e2e8f0; font-family: -apple-system, BlinkMac
 .card { background: #1c2030; border: 1px solid #2d3248; border-radius: 12px; padding: 2rem; width: 100%; max-width: 360px; }
 h1 { font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #c084fc, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 1.5rem; text-align: center; }
 label { font-size: 0.8rem; color: #8896a8; display: block; margin-bottom: 0.4rem; }
-input[type=password], input[type=text] { width: 100%; background: #111318; border: 1px solid #2d3248; border-radius: 6px; color: #e2e8f0; padding: 0.6rem 0.75rem; font-size: 0.9rem; outline: none; margin-bottom: 0.9rem; }
+input[type=password], input[type=text] { width: 100%; background: #111318; border: 1px solid #2d3248; border-radius: 6px; color: #e2e8f0; padding: 0.6rem 0.75rem; font-size: 16px; outline: none; margin-bottom: 0.9rem; }
 input[type=password]:focus, input[type=text]:focus { border-color: #a78bfa; }
 button { width: 100%; margin-top: 0.2rem; background: #a78bfa; border: none; border-radius: 6px; color: #111318; font-weight: 700; padding: 0.65rem; cursor: pointer; font-size: 0.9rem; }
 button:hover { background: #c084fc; }
@@ -480,12 +483,19 @@ async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | 
     if _throttled(ip, username):
         log.warning("[oauth] login throttled for %s", ip)
         return bad("Too many failed attempts. Try again in 15 minutes.", 429)
-    if _user_slowed(username) and _users.exists(username):
-        # Serialize: one attempt at a time per user, each after a growing delay — parallel requests
-        # can't multiply the guess rate, and the real user still gets in with the right password.
-        async with _user_locks.setdefault(username, asyncio.Lock()):
-            await asyncio.sleep(_user_delay(username))
-            ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
+    if _user_slowed(username):
+        # Same path for existing and unknown usernames (no timing oracle). One attempt at a time per
+        # (user, IP), each after a growing delay; a second parallel attempt from that IP gets 429 instead
+        # of queueing, so nobody's traffic can make the real user wait behind it.
+        lock = _user_locks.setdefault((username, ip), asyncio.Lock())
+        if lock.locked():
+            return bad("Too many failed attempts. Try again in a minute.", 429)
+        try:
+            async with lock:
+                await asyncio.sleep(_user_delay(username))
+                ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
+        finally:
+            _user_locks.pop((username, ip), None)  # no lingering entries: memory stays bounded
     else:
         ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
     if not ok:
@@ -613,7 +623,7 @@ h1 { font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #c
 p { font-size: 0.88rem; color: #a0aec0; margin-bottom: 0.9rem; line-height: 1.45; }
 b { color: #e2e8f0; }
 label { font-size: 0.8rem; color: #8896a8; display: block; margin-bottom: 0.4rem; }
-input { width: 100%; background: #111318; border: 1px solid #2d3248; border-radius: 6px; color: #e2e8f0; padding: 0.6rem 0.75rem; font-size: 0.9rem; outline: none; margin-bottom: 0.9rem; }
+input { width: 100%; background: #111318; border: 1px solid #2d3248; border-radius: 6px; color: #e2e8f0; padding: 0.6rem 0.75rem; font-size: 16px; outline: none; margin-bottom: 0.9rem; }
 input:focus { border-color: #a78bfa; }
 button { width: 100%; background: #a78bfa; border: none; border-radius: 6px; color: #111318; font-weight: 700; padding: 0.65rem; cursor: pointer; font-size: 0.9rem; }
 button:hover { background: #c084fc; }

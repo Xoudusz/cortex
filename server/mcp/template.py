@@ -202,9 +202,11 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             .hstats { margin-left: 0; width: 100%; gap: 0.9rem; flex-wrap: wrap; }
             .tabs { width: 100%; } .tab { flex: 1; justify-content: center; padding: 0.45rem 0.4rem; }
             .admin-layout { grid-template-columns: minmax(0,1fr); gap: 0.75rem; }
-            .admin-tabs { flex-direction: row; overflow-x: auto; scrollbar-width: none; position: static; border-bottom: 1px solid var(--line); padding-bottom: 0.35rem; }
-            .admin-tabs::-webkit-scrollbar { display: none; }
+            /* wrap instead of a hidden horizontal scroll: every section (Users, Settings) stays visible */
+            .admin-tabs { flex-direction: row; flex-wrap: wrap; gap: 0.25rem; position: static; border-bottom: 1px solid var(--line); padding-bottom: 0.35rem; }
             .admin-tab { flex: 0 0 auto; }
+            /* iOS Safari zooms into any focused field under 16px */
+            input, select, textarea { font-size: 16px !important; }
         }
     </style>
 </head>
@@ -259,7 +261,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
 
         <div id="search-panel" class="panel active">
             <form class="search-form" id="search-form">
-                <input type="text" id="query" placeholder="Search notes and code..." autofocus>
+                <input type="text" id="query" placeholder="Search notes and code...">
                 <button type="submit"><svg class="ico"><use href="#i-search"/></svg>Search</button>
             </form>
             <div class="toggles">
@@ -612,6 +614,8 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             } catch (_) {}
         }
         roleReady.then(isAdmin => { if (isAdmin) { loadRepoFilter(); loadStats(); } });
+        // Focus search only with a mouse: on phones autofocus pops the keyboard on every visit.
+        if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) document.getElementById('query').focus();
 
         searchForm.addEventListener('submit', async (e) => {
             e.preventDefault();
