@@ -36,6 +36,14 @@ echo "=== tests/test_ignores.py ==="
 $PYTHON tests/test_ignores.py
 
 echo ""
+echo "=== tests/test_users.py ==="
+$PYTHON tests/test_users.py
+
+echo ""
+echo "=== tests/test_multiuser.py ==="
+$PYTHON tests/test_multiuser.py
+
+echo ""
 echo "=== tests/test_godot.py ==="
 $PYTHON tests/test_godot.py
 

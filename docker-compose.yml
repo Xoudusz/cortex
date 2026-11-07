@@ -27,6 +27,7 @@ services:
       - QDRANT_URL=http://qdrant:6333
       - NOTES_PATH=/notes
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
       - BASE_URL=${BASE_URL:-https://cortex.hyvitech.org}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}

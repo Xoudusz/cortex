@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timezone
 
 from config import REPOS_CONFIG, DATA_DIR, WORKSPACE
+from state import get_active_workspace
 
 DEFAULT_REPOS = [
     "Xoudusz/weakness-dex",
@@ -18,16 +19,29 @@ DEFAULT_REPOS = [
 ]
 
 
+def _ws(workspace: str = "") -> str:
+    """Explicit workspace, else the caller's active one (per-user when a request user is bound)."""
+    return workspace or get_active_workspace() or WORKSPACE
+
+
 def _repos_config_path(workspace: str = "") -> str:
-    ws = workspace or WORKSPACE
+    ws = _ws(workspace)
     if ws == "default":
         return REPOS_CONFIG
     return str(DATA_DIR / ws / "repos.json")
 
 
+def ensure_workspace_repos(workspace: str) -> None:
+    """Create an empty repos.json for a new workspace (else it would inherit DEFAULT_REPOS)."""
+    path = _repos_config_path(workspace)
+    if not os.path.exists(path):
+        _save_repos_meta({"repos": [], "indexed_at": {}}, workspace)
+
+
 def _load_repos_meta(workspace: str = "") -> dict:
     """Load repo metadata (repo list + indexed_at timestamps) from disk."""
-    path = _repos_config_path(workspace)
+    ws = _ws(workspace)
+    path = _repos_config_path(ws)
     try:
         if os.path.exists(path):
             with open(path) as f:
@@ -39,7 +53,8 @@ def _load_repos_meta(workspace: str = "") -> dict:
                 return {"repos": data, "indexed_at": {}}
     except Exception:
         pass
-    return {"repos": list(DEFAULT_REPOS), "indexed_at": {}}
+    # only the admin's own workspace falls back to the built-in repo list
+    return {"repos": list(DEFAULT_REPOS) if ws == "default" else [], "indexed_at": {}}
 
 
 def _load_repos(workspace: str = "") -> list:

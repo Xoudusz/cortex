@@ -47,7 +47,9 @@ cortex index ~/projects/my-app
 | `get_stats()` | Efficiency metrics |
 | `get_onboarding(existing_content)` | CLAUDE.md template with cortex instructions |
 | `switch_workspace(name)` | Switch active workspace (isolated collections + repos) |
-| `list_workspaces()` | List all workspaces and their index status |
+| `list_workspaces()` | List your workspaces and their index status |
+| `whoami()` | Server mode: your user, role and workspaces |
+| admin tools | Server mode: `create_workspace`, `add_repo`, `invite_user`, `list_users`, `grant_workspace`, ... (see "Sharing workspaces") |
 
 ---
 
@@ -173,6 +175,28 @@ Built-in OAuth 2.0 AS — no external provider needed.
 - Authorization code + refresh token flow
 - 30-day access tokens, 90-day refresh tokens
 - State persists in `/app/data/oauth_state.json` across restarts
+- Login: username + password. `admin` (or blank username) uses `ADMIN_PASSWORD`
+
+## Sharing workspaces (server mode, multi-user)
+
+Share a project with a few people without exposing your own notes or repos. No database: users live in `/app/data/users.json` (mode 600).
+
+- `default` is yours alone: your vault and your repos. It can't be shared.
+- A **shared workspace** has its own code repos and, optionally, a **wiki repo**: a GitHub repo of markdown files indexed as that workspace's notes. Everyone who can push to it edits the wiki. Add the cortex webhook to the wiki repo so pushes reindex it.
+- **Invite links**: single use, valid 7 days, only a hash is stored. The invited person picks their own password (scrypt, OWASP parameters). Login errors are generic. Failed logins are blocked per IP (10 per 15 min) and slowed per username, never locked: someone failing on purpose can't lock you out. Set `TRUSTED_PROXIES` to your reverse proxy's address so clients can't fake their IP via `X-Forwarded-For`. Indexers skip symlinks, so a pushed symlink can't pull server files into a shared index.
+- **Members** use Cortex through Claude Code only. They see and search only their granted workspaces, can switch between them and reindex them. The dashboard shows them a connect card; the dashboard API is admin-only.
+- Removing a user revokes their logins immediately.
+
+Admin flow (dashboard → Admin → Users, or ask Claude):
+
+```
+create_workspace("proj", wiki_repo="you/proj-wiki")
+add_repo("you/proj-game", "proj")
+reindex in proj   (dashboard: Users → proj → Reindex)
+invite_user("alex", ["proj"])   → send the link
+```
+
+Private repos must be readable by the cortex GitHub token (Admin → Settings); for repos owned by someone else, add the token's account as collaborator.
 
 ## Excluding files per repo
 

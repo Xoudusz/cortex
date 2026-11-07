@@ -11,7 +11,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, SparseVector, SparseVectorParams, VectorParams
 
 from cache import load_cache, save_cache
-from chunker import _is_excluded
+from chunker import _is_excluded, is_safe_file
 
 NOTES_DIR        = Path(os.environ.get("NOTES_PATH", "/notes"))
 OLLAMA_URL       = os.environ.get("OLLAMA_URL", "http://ollama:11434")
@@ -121,7 +121,7 @@ def main():
         print(f"  warn: sparse vectors unavailable (dense-only fallback): {e}", flush=True)
 
     md_files = [p for p in NOTES_DIR.rglob("*.md")
-                if ".obsidian" not in p.parts and ".git" not in p.parts]
+                if ".obsidian" not in p.parts and ".git" not in p.parts and is_safe_file(p, NOTES_DIR)]
 
     cache = load_cache("notes")
     if client.get_collection(COLLECTION).points_count == 0:

@@ -13,9 +13,12 @@ from starlette.responses import JSONResponse, Response
 
 from config import DATA_DIR, get_github_token, read_settings, write_settings, OLLAMA_URL, QDRANT_URL, STATS_FILE, VERSION, WEBHOOK_SECRET, embed, sparse_embed
 from state import _reindex_log, _stats, _webhook_log
-from repos import _load_repos, _load_repos_meta, _save_repos
+from repos import _load_repos, _load_repos_meta, _save_repos, ensure_workspace_repos
 from reindex import _enqueue, get_status, get_queue_snapshot, clear_cache as _clear_cache
 from web_ui import LOGO_SVG, api_search, api_stats, api_status, ui
+import oauth as _oauth
+import users as _users
+from state import current_user, _workspace_data_dir
 
 log = logging.getLogger("cortex")
 
@@ -34,6 +37,19 @@ def _verify_webhook_sig(body: bytes, sig_header: str) -> bool:
     """Return True if the HMAC-SHA256 signature on body matches sig_header."""
     expected = "sha256=" + hmac.new(WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(sig_header, expected)
+
+
+def _webhook_targets(full_name: str) -> tuple[list, list]:
+    """(workspaces tracking the repo as code, workspaces using it as their wiki) for a pushed owner/name."""
+    name = full_name.split("/")[-1]
+    code_ws, wiki_ws = [], []
+    for ws in ["default"] + sorted(_users.list_registered()):
+        repos = _load_repos(ws)
+        if full_name in repos or (name and name in [r.split("/")[-1] for r in repos]):
+            code_ws.append(ws)
+        if ws != "default" and full_name and _users.get_wiki(ws).lower() == full_name.lower():
+            wiki_ws.append(ws)
+    return code_ws, wiki_ws
 
 
 def _parse_webhook_payload(body: bytes) -> tuple[str, list, list]:
@@ -64,14 +80,27 @@ async def webhook(request: Request) -> JSONResponse:
     if event != "push":
         return JSONResponse({"status": "ignored", "event": event})
     repo, changed, removed = _parse_webhook_payload(body)
+    try:
+        full_name = json.loads(body).get("repository", {}).get("full_name", "") or repo
+    except Exception:
+        full_name = repo
     ts = datetime.now(timezone.utc).isoformat()
     log_entry = {"repo": repo or "unknown", "ts": ts, "status": "queued", "files": len(changed)}
     _webhook_log.insert(0, log_entry)
     _webhook_log[:] = _webhook_log[:50]
-    status = _enqueue(False, True, repo, files=changed if (changed or removed) else None, removed=removed, _log_entry=log_entry)
+    code_ws, wiki_ws = _webhook_targets(full_name)
+    statuses = []
+    for ws in code_ws:
+        statuses.append(_enqueue(False, True, repo, files=changed if (changed or removed) else None, removed=removed,
+                                 _log_entry=log_entry, workspace=ws))
+    for ws in wiki_ws:
+        statuses.append(_enqueue(True, False, workspace=ws))
+    status = ("merged" if statuses and all(s == "merged" for s in statuses) else "triggered") if statuses else "untracked"
     log_entry["status"] = status
-    log.info("[webhook] push on %s -> %d changed, %d removed -> %s", repo or "unknown", len(changed), len(removed), status)
-    return JSONResponse({"status": "ok", "repo": repo, "files_changed": len(changed)})
+    log_entry["workspaces"] = code_ws + [f"{w} (wiki)" for w in wiki_ws]
+    log.info("[webhook] push on %s -> %d changed, %d removed -> %s %s", full_name or "unknown", len(changed),
+             len(removed), status, log_entry["workspaces"])
+    return JSONResponse({"status": "ok", "repo": repo, "files_changed": len(changed), "workspaces": log_entry["workspaces"]})
 
 
 async def _ui_handler(request: Request):
@@ -132,7 +161,7 @@ async def _api_graph_handler(request: Request) -> JSONResponse:
     repo = request.path_params.get("repo", "")
     if not repo:
         return JSONResponse({"error": "repo required"}, status_code=400)
-    graph_path = DATA_DIR / ("graph_notes.json" if repo == "notes" else f"graph_{repo}.json")
+    graph_path = _workspace_data_dir() / ("graph_notes.json" if repo == "notes" else f"graph_{repo}.json")
     if not graph_path.exists():
         return JSONResponse({"error": f"No graph for '{repo}'. Run reindex first."}, status_code=404)
     try:
@@ -252,6 +281,132 @@ async def _api_settings_handler(request: Request) -> JSONResponse:
         except Exception as e:
             info["error"] = str(e)
     return JSONResponse(info)
+
+
+async def _api_me_handler(request: Request) -> JSONResponse:
+    """Who is calling (members may use this; the dashboard shows them the connect card only)."""
+    user = current_user() or _users.ADMIN
+    return JSONResponse({"user": user, "admin": _users.is_admin(user), "workspaces": _users.user_workspaces(user)})
+
+
+async def _json(request: Request) -> dict:
+    try:
+        body = await request.json()
+        return body if isinstance(body, dict) else {}
+    except Exception:
+        return {}
+
+
+def _err(msg: str, status: int = 400) -> JSONResponse:
+    return JSONResponse({"error": msg}, status_code=status)
+
+
+async def _api_users_handler(request: Request) -> JSONResponse:
+    """[admin] GET users + pending invites."""
+    return JSONResponse({"users": _users.list_users(), "invites": _users.list_invites()})
+
+
+async def _api_user_delete(request: Request) -> JSONResponse:
+    """[admin] DELETE /api/users/{name}: remove user (or pending invite) and revoke their logins."""
+    name = request.path_params["name"]
+    if name == _users.ADMIN:
+        return _err("The admin can't be removed.")
+    removed, invite = _users.remove_user(name), _users.revoke_invite(name)
+    if not removed and not invite:
+        return _err(f"No user or invite named '{name}'.", 404)
+    n = _oauth.revoke_user_tokens(name)
+    log.info("[users] removed %s (%d logins revoked)", name, n)
+    return JSONResponse({"ok": True, "revoked": n})
+
+
+async def _api_user_workspaces(request: Request) -> JSONResponse:
+    """[admin] POST/DELETE /api/users/{name}/workspaces {workspace}: grant/revoke."""
+    name = request.path_params["name"]
+    ws = str((await _json(request)).get("workspace", "")).strip()
+    err = _users.grant(name, ws) if request.method == "POST" else _users.revoke(name, ws)
+    return _err(err) if err else JSONResponse({"ok": True, "workspaces": _users.user_workspaces(name)})
+
+
+async def _api_invites_handler(request: Request) -> JSONResponse:
+    """[admin] POST {username, workspaces[]}: create a single-use invite link (shown once)."""
+    body = await _json(request)
+    wss = body.get("workspaces") or []
+    if not isinstance(wss, list):
+        return _err("workspaces must be a list")
+    token, err = _users.create_invite(str(body.get("username", "")), [str(w) for w in wss],
+                                      created_by=current_user() or _users.ADMIN)
+    if err:
+        return _err(err)
+    return JSONResponse({"link": f"{_oauth.BASE_URL}/invite/{token}", "expires_in_days": _users.INVITE_TTL.days})
+
+
+def _workspace_view(name: str, info: dict, members: dict) -> dict:
+    meta = _load_repos_meta(name)
+    return {"name": name, "wiki_repo": info.get("wiki_repo", ""), "repos": meta.get("repos", []),
+            "indexed_at": meta.get("indexed_at", {}), "errors": meta.get("errors", {}),
+            "members": members.get(name, [])}
+
+
+async def _api_workspaces_handler(request: Request) -> JSONResponse:
+    """[admin] GET shared workspaces (repos, wiki, members). POST {name, wiki_repo}: create."""
+    if request.method == "POST":
+        body = await _json(request)
+        name = str(body.get("name", "")).strip().lower()
+        err = _users.create_workspace(name, str(body.get("wiki_repo", "")))
+        if err:
+            return _err(err)
+        ensure_workspace_repos(name)
+        log.info("[users] workspace %s created", name)
+    members: dict = {}
+    for u in _users.list_users():
+        for w in u["workspaces"]:
+            members.setdefault(w, []).append(u["username"])
+    regs = _users.list_registered()
+    return JSONResponse({"workspaces": [_workspace_view(n, regs[n], members) for n in sorted(regs)]})
+
+
+def _known_ws(name: str) -> bool:
+    return name in _users.list_registered()
+
+
+async def _api_workspace_item(request: Request) -> JSONResponse:
+    """[admin] PUT {wiki_repo}: set wiki. DELETE: unregister workspace (data stays on disk)."""
+    name = request.path_params["name"]
+    if request.method == "DELETE":
+        err = _users.delete_workspace(name)
+    else:
+        err = _users.set_wiki(name, str((await _json(request)).get("wiki_repo", "")))
+    return _err(err) if err else JSONResponse({"ok": True})
+
+
+async def _api_workspace_repos(request: Request) -> JSONResponse:
+    """[admin] POST {repo} / DELETE /api/workspaces/{name}/repos/{repo}: manage a workspace's code repos."""
+    name = request.path_params["name"]
+    if not _known_ws(name):
+        return _err(f"Unknown workspace '{name}'.", 404)
+    repos = _load_repos(name)
+    if request.method == "POST":
+        repo = str((await _json(request)).get("repo", "")).strip()
+        if not _users.valid_repo(repo):
+            return _err("Use owner/name format")
+        if repo not in repos:
+            repos.append(repo)
+    else:
+        repo = request.path_params.get("repo", "")
+        repos = [r for r in repos if r != repo]
+    _save_repos(repos, name)
+    return JSONResponse({"repos": repos})
+
+
+async def _api_workspace_reindex(request: Request) -> JSONResponse:
+    """[admin] POST {notes, code, force}: queue a reindex job in a shared workspace."""
+    name = request.path_params["name"]
+    if not _known_ws(name):
+        return _err(f"Unknown workspace '{name}'.", 404)
+    body = await _json(request)
+    _enqueue(bool(body.get("notes", True)), bool(body.get("code", True)), files=None,
+             force=bool(body.get("force", False)), workspace=name)
+    return JSONResponse({"status": "queued", "workspace": name})
 
 
 async def _api_webhook_log_handler(request: Request) -> JSONResponse:

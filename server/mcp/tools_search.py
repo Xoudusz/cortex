@@ -9,7 +9,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Prefetch, Fusion, SparseVector
 
 from config import QDRANT_URL, DATA_DIR, embed, sparse_embed, collection_name, PPR_THRESHOLD
-from state import _stats, _get_code_graph_meta, get_active_workspace, _workspace_data_dir
+from state import _stats, _get_code_graph_meta, current_user, get_active_workspace, _workspace_data_dir
 from repos import _load_repos
 from formatters import format_notes_parts, format_code_results
 
@@ -18,7 +18,8 @@ log = logging.getLogger("cortex")
 
 def _log_search(tool: str, query: str, top: list) -> None:
     try:
-        entry = {"ts": time.time(), "tool": tool, "query": query, "top": top}
+        entry = {"ts": time.time(), "tool": tool, "query": query, "top": top,
+                 "user": current_user(), "ws": get_active_workspace()}
         with open(DATA_DIR / "search_log.jsonl", "a") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception:

@@ -4,10 +4,12 @@
 import json
 import logging
 import time
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 
 from config import DATA_DIR, STATS_FILE, VERSION, WORKSPACE
+import users as _users
 
 log = logging.getLogger("cortex")
 
@@ -18,21 +20,61 @@ _reindex_log: list = []
 # In-memory cache: "workspace/repo_name" → {file_path: node_metadata_dict}
 _graph_cache: dict = {}
 
-_active_workspace: str = WORKSPACE
+_active_workspace: str = WORKSPACE  # used only when no request user is bound (auth off, startup)
+
+# Per-request identity. Bound by the HTTP middleware (routes) and by CortexMCP.call_tool (MCP tools,
+# which run outside the POST request's task), and by the reindex worker for each job.
+_current_user: ContextVar = ContextVar("cortex_user", default=None)
+_current_ws: ContextVar = ContextVar("cortex_ws", default=None)
+
+
+def bind_request(user: str | None, ws: str | None = None) -> tuple:
+    """Bind user + workspace (default: the user's remembered one) to this context; returns reset tokens."""
+    if user is not None and ws is None:
+        ws = _users.get_active_ws(user)
+    return _current_user.set(user), _current_ws.set(ws)
+
+
+def unbind_request(tokens: tuple) -> None:
+    _current_user.reset(tokens[0])
+    _current_ws.reset(tokens[1])
+
+
+def bind_workspace(ws: str):
+    """Bind only the workspace (reindex worker thread). Returns a reset token."""
+    return _current_ws.set(ws)
+
+
+def unbind_workspace(token) -> None:
+    _current_ws.reset(token)
+
+
+def current_user() -> str | None:
+    return _current_user.get()
 
 
 def get_active_workspace() -> str:
+    ws = _current_ws.get()
+    if ws:
+        return ws
+    if _current_user.get() is not None:
+        # a bound user without any workspace must never fall through to the admin's "default"
+        raise PermissionError("No workspace available. Ask the admin to grant you one.")
     return _active_workspace
 
 
 def set_active_workspace(name: str) -> None:
     global _active_workspace
-    _active_workspace = name
-    _graph_cache.clear()
+    user = _current_user.get()
+    if user is not None:
+        _users.set_active_ws(user, name)
+        _current_ws.set(name)
+    else:
+        _active_workspace = name
 
 
 def _workspace_data_dir(ws: str = "") -> Path:
-    ws = ws or _active_workspace
+    ws = ws or get_active_workspace()
     if ws == "default":
         return DATA_DIR
     return DATA_DIR / ws
@@ -120,7 +162,7 @@ def _get_code_graph_meta(repo_name: str) -> dict:
     Maps file path → node dict (centrality, community_id, imports, imported_by).
     Returns an empty dict when no graph data exists for the repo.
     """
-    ws = _active_workspace
+    ws = get_active_workspace()
     cache_key = f"{ws}/{repo_name}"
     if cache_key in _graph_cache:
         _stats["graph_cache_hits"] += 1
@@ -143,7 +185,7 @@ def _get_code_graph_meta(repo_name: str) -> dict:
 def _invalidate_graph_cache(repo_name: str = "") -> None:
     """Evict repo_name from the graph cache, or clear everything if empty."""
     if repo_name:
-        ws = _active_workspace
+        ws = get_active_workspace()
         _graph_cache.pop(f"{ws}/{repo_name}", None)
     else:
         _graph_cache.clear()

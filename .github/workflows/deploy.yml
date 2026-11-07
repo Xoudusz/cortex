@@ -36,6 +36,8 @@ jobs:
         run: |
           pip install -q -r server/mcp/requirements.txt
           python server/mcp/tests/test_imports.py
+          python tests/test_users.py
+          python tests/test_multiuser.py
 
       - name: Test local package imports
         run: |

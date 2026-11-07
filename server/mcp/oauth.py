@@ -4,21 +4,32 @@ Implements:
 - RFC 8414: Authorization Server Metadata
 - RFC 7591: Dynamic Client Registration
 - RFC 7636: PKCE (S256 only)
-- Authorization Code + Refresh Token grants (single-user, password-based)
+- Authorization Code + Refresh Token grants (username + password; see users.py)
+
+Every issued code/token records the "user" it belongs to. Tokens issued before multi-user
+support carry no user and are treated as the admin's, so nobody has to log in again.
 """
+import asyncio
 import base64
 import hashlib
+import html
 import httpx
+import ipaddress
 import json
 import logging
 import os
 import secrets
+import threading
+import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+
+import users as _users
 
 log = logging.getLogger("cortex.oauth")
 
@@ -97,12 +108,117 @@ _purge_expired()
 _ensure_web_ui_client()
 
 
+def bearer_token(headers) -> str:
+    """Extract the Bearer token from ASGI header pairs or a Starlette Headers mapping."""
+    if isinstance(headers, (list, tuple)):
+        auth = dict(headers).get(b"authorization", b"").decode()
+    else:
+        auth = headers.get("authorization", "")
+    return auth[7:] if auth.startswith("Bearer ") else ""
+
+
+def token_user(token: str) -> str | None:
+    """Return the username a valid, unexpired access token belongs to, else None.
+
+    Legacy tokens (no "user" field) belong to the admin. Tokens of removed users are invalid.
+    """
+    entry = _store["tokens"].get(token or "")
+    if not entry or _now_iso() >= entry.get("expires_at", ""):
+        return None
+    user = entry.get("user") or _users.ADMIN
+    return user if _users.exists(user) else None
+
+
 def verify_token(token: str) -> bool:
     """Return True if token exists in _store and has not expired."""
-    entry = _store["tokens"].get(token)
-    if not entry:
-        return False
-    return _now_iso() < entry.get("expires_at", "")
+    return token_user(token) is not None
+
+
+def revoke_user_tokens(username: str) -> int:
+    """Delete every access/refresh token of username (used when a user is removed)."""
+    n = 0
+    for key in ("tokens", "refresh_tokens"):
+        keep = {k: v for k, v in _store[key].items() if (v.get("user") or _users.ADMIN) != username}
+        n += len(_store[key]) - len(keep)
+        _store[key] = keep
+    if n:
+        _save()
+    return n
+
+
+# --- failed-login throttle (in memory) ---
+# Per client IP: hard block. Per username: only a delay — a hard per-user block would let anyone lock
+# the admin out by failing on purpose; the delay still caps distributed guessing at ~1 try / 3 s.
+_FAIL_WINDOW = 15 * 60
+_FAIL_LIMITS = {"ip": 10, "user": 30}
+_USER_DELAY = 3.0
+_fails: dict = {}
+_fails_lock = threading.Lock()
+
+# Peers allowed to set X-Forwarded-For (the reverse proxy). Override with TRUSTED_PROXIES (comma-separated
+# CIDRs), ideally the proxy's exact address/subnet so LAN clients hitting the port directly can't spoof it.
+TRUSTED_PROXIES = [ipaddress.ip_network(c.strip(), strict=False) for c in (
+    os.environ.get("TRUSTED_PROXIES") or "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+).split(",") if c.strip()]
+
+
+def _client_ip(request: Request) -> str:
+    """Client address for throttling. X-Forwarded-For is only honoured when the direct peer is a
+    trusted proxy, and then only its rightmost hop (the one our proxy appended) — the leftmost
+    entries are whatever the client chose to send."""
+    peer = request.client.host if request.client else ""
+    try:
+        addr = ipaddress.ip_address(peer)
+        trusted = any(addr in net for net in TRUSTED_PROXIES)
+    except ValueError:
+        trusted = False
+    if trusted:
+        hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        if hops:
+            return hops[-1]
+    return peer or "?"
+
+
+def _fail_keys(ip: str, username: str) -> list:
+    return [("ip", ip), ("user", username)]
+
+
+def _over_limit(kind: str, value: str) -> bool:
+    now = time.time()
+    key = (kind, value)
+    with _fails_lock:
+        recent = [t for t in _fails.get(key, []) if now - t < _FAIL_WINDOW]
+        _fails[key] = recent
+        return len(recent) >= _FAIL_LIMITS[kind]
+
+
+def _throttled(ip: str, username: str) -> bool:
+    """Hard block: only the per-IP bucket."""
+    return _over_limit("ip", ip)
+
+
+def _user_slowed(username: str) -> bool:
+    """Per-username bucket full: slow the attempt down, but still let the right password in."""
+    return _over_limit("user", username)
+
+
+_USER_DELAY_MAX = 30.0
+_user_locks: dict = {}  # username -> asyncio.Lock; only created for existing users
+
+
+def _user_delay(username: str) -> float:
+    """3 s at the limit, doubling every 10 further failures, capped at 30 s."""
+    with _fails_lock:
+        n = len(_fails.get(("user", username), []))
+    extra = max(0, n - _FAIL_LIMITS["user"]) // 10
+    return min(_USER_DELAY_MAX, _USER_DELAY * (2 ** extra))
+
+
+def _record_fail(ip: str, username: str) -> None:
+    now = time.time()
+    with _fails_lock:
+        for key in _fail_keys(ip, username):
+            _fails.setdefault(key, []).append(now)
 
 
 def _pkce_verify(verifier: str, challenge: str) -> bool:
@@ -190,9 +306,9 @@ body { background: #111318; color: #e2e8f0; font-family: -apple-system, BlinkMac
 .card { background: #1c2030; border: 1px solid #2d3248; border-radius: 12px; padding: 2rem; width: 100%; max-width: 360px; }
 h1 { font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #c084fc, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 1.5rem; text-align: center; }
 label { font-size: 0.8rem; color: #8896a8; display: block; margin-bottom: 0.4rem; }
-input[type=password] { width: 100%; background: #111318; border: 1px solid #2d3248; border-radius: 6px; color: #e2e8f0; padding: 0.6rem 0.75rem; font-size: 0.9rem; outline: none; }
-input[type=password]:focus { border-color: #a78bfa; }
-button { width: 100%; margin-top: 1rem; background: #a78bfa; border: none; border-radius: 6px; color: #111318; font-weight: 700; padding: 0.65rem; cursor: pointer; font-size: 0.9rem; }
+input[type=password], input[type=text] { width: 100%; background: #111318; border: 1px solid #2d3248; border-radius: 6px; color: #e2e8f0; padding: 0.6rem 0.75rem; font-size: 0.9rem; outline: none; margin-bottom: 0.9rem; }
+input[type=password]:focus, input[type=text]:focus { border-color: #a78bfa; }
+button { width: 100%; margin-top: 0.2rem; background: #a78bfa; border: none; border-radius: 6px; color: #111318; font-weight: 700; padding: 0.65rem; cursor: pointer; font-size: 0.9rem; }
 button:hover { background: #c084fc; }
 .error { color: #f87171; font-size: 0.8rem; margin-top: 0.75rem; text-align: center; }
 </style>
@@ -206,8 +322,10 @@ button:hover { background: #c084fc; }
     <input type="hidden" name="code_challenge" value="__CODE_CHALLENGE__">
     <input type="hidden" name="code_challenge_method" value="__CODE_CHALLENGE_METHOD__">
     <input type="hidden" name="state" value="__STATE__">
+    <label for="user">Username</label>
+    <input type="text" id="user" name="username" value="__USERNAME__" autofocus autocomplete="username" autocapitalize="none" spellcheck="false">
     <label for="pw">Password</label>
-    <input type="password" id="pw" name="password" autofocus autocomplete="current-password">
+    <input type="password" id="pw" name="password" autocomplete="current-password">
     <button type="submit">Sign in</button>
     __ERROR__
   </form>
@@ -289,15 +407,18 @@ def _render_form(
     code_challenge_method: str,
     state: str,
     error: str = "",
+    username: str = "",
 ) -> str:
-    error_html = f'<p class="error">{error}</p>' if error else ""
+    e = lambda s: html.escape(s or "", quote=True)  # noqa: E731 — values come from the query string
+    error_html = f'<p class="error">{e(error)}</p>' if error else ""
     return (
         _FORM_TEMPLATE
-        .replace("__CLIENT_ID__", client_id)
-        .replace("__REDIRECT_URI__", redirect_uri)
-        .replace("__CODE_CHALLENGE__", code_challenge)
-        .replace("__CODE_CHALLENGE_METHOD__", code_challenge_method)
-        .replace("__STATE__", state)
+        .replace("__CLIENT_ID__", e(client_id))
+        .replace("__REDIRECT_URI__", e(redirect_uri))
+        .replace("__CODE_CHALLENGE__", e(code_challenge))
+        .replace("__CODE_CHALLENGE_METHOD__", e(code_challenge_method))
+        .replace("__STATE__", e(state))
+        .replace("__USERNAME__", e(username))
         .replace("__ERROR__", error_html)
     )
 
@@ -336,30 +457,45 @@ async def authorize_get(request: Request) -> HTMLResponse | JSONResponse:
 
 
 async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | JSONResponse:
-    """Validate password, issue auth code, and redirect to redirect_uri with code + state."""
+    """Validate username + password, issue auth code, and redirect to redirect_uri with code + state."""
     form = await request.form()
-    password = form.get("password", "")
+    username = str(form.get("username", "")).strip().lower() or _users.ADMIN  # blank = admin (old habit)
+    password = str(form.get("password", ""))
     client_id = form.get("client_id", "")
     redirect_uri = form.get("redirect_uri", "")
     code_challenge = form.get("code_challenge", "")
     code_challenge_method = form.get("code_challenge_method", "S256")
     state = form.get("state", "")
 
-    def bad(msg: str) -> HTMLResponse:
+    def bad(msg: str, status: int = 400) -> HTMLResponse:
         return HTMLResponse(
-            _render_form(client_id, redirect_uri, code_challenge, code_challenge_method, state, msg),
-            status_code=400,
+            _render_form(client_id, redirect_uri, code_challenge, code_challenge_method, state, msg, username),
+            status_code=status,
         )
 
     if not ADMIN_PASSWORD:
         return bad("Auth not configured — set ADMIN_PASSWORD env var")
 
-    if not secrets.compare_digest(password, ADMIN_PASSWORD):
-        log.warning("[oauth] failed login attempt from %s", request.client)
-        return bad("Incorrect password")
+    ip = _client_ip(request)
+    if _throttled(ip, username):
+        log.warning("[oauth] login throttled for %s", ip)
+        return bad("Too many failed attempts. Try again in 15 minutes.", 429)
+    if _user_slowed(username) and _users.exists(username):
+        # Serialize: one attempt at a time per user, each after a growing delay — parallel requests
+        # can't multiply the guess rate, and the real user still gets in with the right password.
+        async with _user_locks.setdefault(username, asyncio.Lock()):
+            await asyncio.sleep(_user_delay(username))
+            ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
+    else:
+        ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
+    if not ok:
+        _record_fail(ip, username)
+        log.warning("[oauth] failed login for %r from %s", username[:40], ip)
+        return bad("Incorrect username or password")  # generic: don't reveal which part was wrong
 
     code = secrets.token_hex(32)
     _store["codes"][code] = {
+        "user": username,
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "code_challenge": code_challenge,
@@ -427,10 +563,11 @@ async def token_endpoint(request: Request) -> JSONResponse:
         access_token = secrets.token_urlsafe(48)
         refresh_token = secrets.token_urlsafe(48)
         ts = datetime.now(timezone.utc)
-        _store["tokens"][access_token] = {"client_id": entry["client_id"], "expires_at": _iso(ts + TOKEN_TTL)}
-        _store["refresh_tokens"][refresh_token] = {"client_id": entry["client_id"], "expires_at": _iso(ts + REFRESH_TTL)}
+        user = entry.get("user") or _users.ADMIN
+        _store["tokens"][access_token] = {"client_id": entry["client_id"], "user": user, "expires_at": _iso(ts + TOKEN_TTL)}
+        _store["refresh_tokens"][refresh_token] = {"client_id": entry["client_id"], "user": user, "expires_at": _iso(ts + REFRESH_TTL)}
         _save()
-        log.info("[oauth] issued access token for client %s", entry["client_id"])
+        log.info("[oauth] issued access token for client %s (user %s)", entry["client_id"], user)
         return JSONResponse({
             "access_token": access_token,
             "token_type": "Bearer",
@@ -441,10 +578,11 @@ async def token_endpoint(request: Request) -> JSONResponse:
     if grant_type == "refresh_token":
         rt = body.get("refresh_token", "")
         entry = _store["refresh_tokens"].get(rt)
-        if not entry or entry.get("expires_at", "") < _now_iso():
+        user = (entry or {}).get("user") or _users.ADMIN
+        if not entry or entry.get("expires_at", "") < _now_iso() or not _users.exists(user):
             return JSONResponse({"error": "invalid_grant", "error_description": "Invalid or expired refresh token"}, status_code=400)
         access_token = secrets.token_urlsafe(48)
-        _store["tokens"][access_token] = {"client_id": entry["client_id"], "expires_at": _iso(datetime.now(timezone.utc) + TOKEN_TTL)}
+        _store["tokens"][access_token] = {"client_id": entry["client_id"], "user": user, "expires_at": _iso(datetime.now(timezone.utc) + TOKEN_TTL)}
         _save()
         return JSONResponse({
             "access_token": access_token,
@@ -454,3 +592,99 @@ async def token_endpoint(request: Request) -> JSONResponse:
         })
 
     return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
+
+
+# --- invite links ---
+
+_INVITE_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
+<title>Cortex — Invite</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #111318; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; }
+.card { background: #1c2030; border: 1px solid #2d3248; border-radius: 12px; padding: 2rem; width: 100%; max-width: 440px; }
+h1 { font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #c084fc, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 1rem; text-align: center; }
+p { font-size: 0.88rem; color: #a0aec0; margin-bottom: 0.9rem; line-height: 1.45; }
+b { color: #e2e8f0; }
+label { font-size: 0.8rem; color: #8896a8; display: block; margin-bottom: 0.4rem; }
+input { width: 100%; background: #111318; border: 1px solid #2d3248; border-radius: 6px; color: #e2e8f0; padding: 0.6rem 0.75rem; font-size: 0.9rem; outline: none; margin-bottom: 0.9rem; }
+input:focus { border-color: #a78bfa; }
+button { width: 100%; background: #a78bfa; border: none; border-radius: 6px; color: #111318; font-weight: 700; padding: 0.65rem; cursor: pointer; font-size: 0.9rem; }
+button:hover { background: #c084fc; }
+pre { background: #111318; border: 1px solid #2d3248; border-radius: 6px; padding: 0.75rem; font-size: 0.75rem; color: #c084fc; white-space: pre-wrap; word-break: break-all; margin-bottom: 0.9rem; }
+.error { color: #f87171; font-size: 0.8rem; margin-top: 0.75rem; text-align: center; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Cortex</h1>
+  __BODY__
+</div>
+</body>
+</html>"""
+
+
+def _esc(s: str) -> str:
+    return html.escape(s or "", quote=True)
+
+
+def _invite_page(body: str, status: int = 200) -> HTMLResponse:
+    # no-store: the URL carries the invite secret; keep the page out of caches
+    return HTMLResponse(_INVITE_TEMPLATE.replace("__BODY__", body), status_code=status,
+                        headers={"Cache-Control": "no-store"})
+
+
+def _invite_form(info: dict, error: str = "") -> str:
+    wss = ", ".join(info.get("workspaces") or []) or "no workspace yet"
+    err = f'<p class="error">{_esc(error)}</p>' if error else ""
+    return (
+        f"<p>You're invited to Cortex as <b>{_esc(info['username'])}</b> with access to: <b>{_esc(wss)}</b>.</p>"
+        f"<p>Choose a password (at least {_users.MIN_PASSWORD} characters). A password manager helps.</p>"
+        '<form method="POST">'
+        f'<input type="text" name="username" value="{_esc(info["username"])}" autocomplete="username" readonly hidden>'
+        '<label for="pw">Password</label>'
+        '<input type="password" id="pw" name="password" autofocus autocomplete="new-password" required>'
+        '<label for="pw2">Repeat password</label>'
+        '<input type="password" id="pw2" name="password2" autocomplete="new-password" required>'
+        f'<button type="submit">Create account</button>{err}</form>'
+    )
+
+
+_INVITE_INVALID = "<p>This invite link is invalid, already used, or expired. Ask for a new one.</p>"
+
+
+async def invite_get(request: Request) -> HTMLResponse:
+    """Show the set-password form for a pending invite."""
+    info = _users.invite_info(request.path_params.get("token", ""))
+    if not info:
+        return _invite_page(_INVITE_INVALID, 404)
+    return _invite_page(_invite_form(info))
+
+
+async def invite_post(request: Request) -> HTMLResponse:
+    """Consume the invite: create the user, then show how to connect Claude Code."""
+    token = request.path_params.get("token", "")
+    info = _users.invite_info(token)
+    if not info:
+        return _invite_page(_INVITE_INVALID, 404)
+    form = await request.form()
+    pw, pw2 = str(form.get("password", "")), str(form.get("password2", ""))
+    if pw != pw2:
+        return _invite_page(_invite_form(info, "Passwords don't match."), 400)
+    username, err = await run_in_threadpool(_users.accept_invite, token, pw)
+    if err:
+        return _invite_page(_invite_form(info, err), 400)
+    log.info("[oauth] invite accepted: user %s created", username)
+    return _invite_page(
+        f"<p>Account <b>{_esc(username)}</b> created.</p>"
+        "<p>Connect Claude Code (run in a terminal):</p>"
+        f"<pre>claude mcp add cortex --transport sse {_esc(BASE_URL)}/sse</pre>"
+        "<p>On first use a browser login opens: sign in with your username and password. "
+        "Then ask Claude to run <b>list_workspaces</b> to see what you can search.</p>"
+    )
