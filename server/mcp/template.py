@@ -167,7 +167,33 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 3px; }
 
+        /* toasts + modal */
+        #toasts { position: fixed; right: 1rem; bottom: 1rem; z-index: 2000; display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-end; pointer-events: none; }
+        .toast { pointer-events: auto; max-width: min(420px, calc(100vw - 2rem)); padding: 0.55rem 0.85rem; border-radius: 8px; font-size: 0.8rem; background: var(--panel3); border: 1px solid var(--line2); color: var(--text); box-shadow: 0 6px 20px rgba(0,0,0,.4); transition: opacity .3s, transform .3s; }
+        .toast.info { border-color: rgba(var(--acc-rgb),.45); }
+        .toast.error { border-color: rgba(var(--err-rgb),.55); color: #fecdd3; }
+        .toast.out { opacity: 0; transform: translateY(6px); }
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 1500; align-items: center; justify-content: center; padding: 1rem; }
+        .modal-box { background: var(--panel2); border: 1px solid var(--line2); border-radius: 12px; padding: 1.1rem 1.2rem; width: 100%; max-width: 420px; }
+        .modal-box .cm-msg { font-size: 0.88rem; line-height: 1.5; margin-bottom: 1rem; overflow-wrap: anywhere; }
+        .modal-box .cm-row { display: flex; justify-content: flex-end; gap: 0.5rem; }
+        /* repos sections */
+        .avail > summary { cursor: pointer; list-style: none; margin-top: 1rem; user-select: none; }
+        .avail > summary::-webkit-details-marker { display: none; }
+        .avail > summary::before { content: '▸'; display: inline-block; margin-right: 0.4rem; transition: transform .15s; }
+        .avail[open] > summary::before { transform: rotate(90deg); }
+        /* settings: connect card */
+        .cmd { display: flex; align-items: center; gap: 0.4rem; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 0.4rem 0.4rem 0.4rem 0.75rem; font-family: var(--mono); font-size: 0.76rem; margin: 0.5rem 0; }
+        .cmd code { flex: 1; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+        /* logs */
+        #log-output { white-space: normal; word-break: normal; }
+        #log-output > div { white-space: pre; }
+        #log-output .lg-err { color: #fca5a5; } #log-output .lg-warn { color: #fcd34d; }
+        .result-meta .ib { width: 24px; height: 24px; vertical-align: middle; }
+        .result-meta { display: flex; align-items: center; gap: 0.35rem; }
         @media (max-width: 720px) {
+            .card-h { flex-wrap: wrap; } .card-h .sub { order: 3; flex-basis: 100%; }
+            .result-header { flex-direction: column; gap: 0.35rem; } .result-meta { text-align: left; }
             body { padding: 1rem 0.85rem; }
             .hstats { margin-left: 0; width: 100%; gap: 0.9rem; flex-wrap: wrap; }
             .tabs { width: 100%; } .tab { flex: 1; justify-content: center; padding: 0.45rem 0.4rem; }
@@ -189,6 +215,9 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
         <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
         <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+        <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+        <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
         <symbol id="i-eraser" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L11 21M22 21H7M5 11l9 9"/></symbol>
     </svg>
     <div class="container">
@@ -203,6 +232,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <span class="hstat"><b id="stat-code">-</b>code chunks</span>
                 <span class="hstat"><span class="hdot" id="stat-ollama"></span>Ollama</span>
                 <span class="hstat" id="status-text"><span id="status-dot" class="status-dot"></span><span id="status-label">idle</span></span>
+                <button class="ib" id="sign-out" title="Sign out"><svg class="ico"><use href="#i-logout"/></svg></button>
             </div>
         </div>
 
@@ -226,12 +256,12 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     <select id="repo-filter"><option value="">All repos</option></select>
                 </div>
             </div>
-            <div id="search-results" class="results"></div>
+            <div id="search-results" class="results"><div class="empty">Search your notes and code. Claude Code runs the same search through <code>search_notes</code> / <code>search_code</code>.</div></div>
         </div>
 
         <div id="repos-panel" class="panel">
             <form id="repo-add-form" class="search-form">
-                <input id="repo-add-input" placeholder="owner/name (e.g. someone/their-repo)" autocomplete="off">
+                <input id="repo-add-input" placeholder="Filter, or add owner/name" autocomplete="off">
                 <button type="submit"><svg class="ico"><use href="#i-plus"/></svg>Add repo</button>
             </form>
             <div id="repo-gh-warning" class="hint" style="display:none;margin-bottom:0.5rem"></div>
@@ -281,6 +311,11 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             </div>
             <div id="admin-settings" class="admin-section">
                 <div class="card">
+                    <div class="card-h"><h3>Connect Claude Code</h3><span class="sub">run once on the machine that runs Claude Code</span></div>
+                    <div class="cmd"><code id="connect-cmd"></code><button class="ib" id="connect-copy" title="Copy"><svg class="ico"><use href="#i-copy"/></svg></button></div>
+                    <div class="hint">The first tool call opens this login in a browser. After that, <code>search_notes</code>, <code>search_code</code> and <code>reindex</code> are available in every session.</div>
+                </div>
+                <div class="card">
                     <div class="card-h"><h3>GitHub token</h3><span class="sub">lists repos, clones private ones</span></div>
                     <div id="token-status" style="font-size:0.82rem;margin-bottom:0.75rem;color:var(--muted)">Loading...</div>
                     <form id="token-form" style="display:flex;gap:0.5rem;flex-wrap:wrap">
@@ -297,8 +332,8 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             </div>
             <div id="admin-logs" class="admin-section">
                 <div class="card">
-                    <div class="card-h"><h3>Server log</h3><span class="sub">last 200 lines</span><span class="push"><label class="toggle"><input type="checkbox" id="log-tail-toggle">follow</label><button onclick="loadLogs()" class="ib" title="Refresh"><svg class="ico"><use href="#i-refresh"/></svg></button></span></div>
-                    <pre id="log-output" class="status-log" style="max-height:420px;margin-top:0;word-break:break-all">No logs loaded.</pre>
+                    <div class="card-h"><h3>Server log</h3><span class="sub">last 200 lines</span><span class="push"><select id="log-level" title="Level"><option value="all">All</option><option value="warn">Warnings + errors</option><option value="err">Errors</option></select><label class="toggle"><input type="checkbox" id="log-tail-toggle">follow</label><button onclick="loadLogs()" class="ib" title="Refresh"><svg class="ico"><use href="#i-refresh"/></svg></button></span></div>
+                    <div id="log-output" class="status-log" style="max-height:420px;margin-top:0">No logs loaded.</div>
                 </div>
             </div>
             </div>
@@ -550,10 +585,10 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             resultsDiv.innerHTML = all.map(r => {
                 if (r.type === 'note') {
                     const tags = (r.tags || []).map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('');
-                    return '<div class="result-card"><div class="result-header"><div class="result-title">' + escapeHtml(r.file) + ' > ' + escapeHtml(r.heading) + '</div><div class="result-meta">score ' + r.score.toFixed(3) + '</div></div><div class="result-content">' + escapeHtml(r.text) + '</div>' + (tags ? '<div class="result-tags">' + tags + '</div>' : '') + '</div>';
+                    return '<div class="result-card"><div class="result-header"><div class="result-title">' + escapeHtml(r.file) + ' > ' + escapeHtml(r.heading) + '</div><div class="result-meta">score ' + r.score.toFixed(3) + copyBtn(r.file) + '</div></div><div class="result-content">' + escapeHtml(r.text) + '</div>' + (tags ? '<div class="result-tags">' + tags + '</div>' : '') + '</div>';
                 } else {
-                    const link = r.github_url ? '<a href="' + escapeHtml(r.github_url) + '" target="_blank">GitHub</a>' : '';
-                    return '<div class="result-card"><div class="result-header"><div class="result-title">' + escapeHtml(r.repo) + ' / ' + escapeHtml(r.file) + ' :' + r.start_line + '-' + r.end_line + '</div><div class="result-meta">' + escapeHtml(r.language || '') + ' · ' + r.score.toFixed(3) + (link ? ' · ' + link : '') + '</div></div><div class="result-content">' + escapeHtml(r.text) + '</div></div>';
+                    const link = r.github_url ? '<a class="ib" href="' + escapeHtml(r.github_url) + '" target="_blank" rel="noopener" title="Open on GitHub"><svg class="ico"><use href="#i-ext"/></svg></a>' : '';
+                    return '<div class="result-card"><div class="result-header"><div class="result-title">' + escapeHtml(r.repo) + ' / ' + escapeHtml(r.file) + ' :' + r.start_line + '-' + r.end_line + '</div><div class="result-meta">' + escapeHtml(r.language || '') + ' · ' + r.score.toFixed(3) + copyBtn(r.repo + '/' + r.file + ':' + r.start_line) + link + '</div></div><div class="result-content">' + escapeHtml(r.text) + '</div></div>';
                 }
             }).join('');
         }
@@ -591,7 +626,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     const btn = document.getElementById('history-btn');
                     if (histKeys.length) {
                         btn.style.display = '';
-                        btn.textContent = 'Show past versions (' + histKeys.length + ')';
+                        btn.textContent = 'Past versions (' + histKeys.length + ')';
                         btn.onclick = () => openHistoryModal(hist, histKeys);
                     } else {
                         btn.style.display = 'none';
@@ -626,10 +661,15 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             const pre = document.getElementById('log-output');
             try {
                 const data = await api('/api/logs?lines=200');
-                pre.textContent = data.lines.length ? data.lines.join('\\n') : 'Log file empty.';
+                const lvl = document.getElementById('log-level').value;
+                const isErr = l => l.includes(' ERROR ') || l.includes(' CRITICAL ');
+                const isWarn = l => l.includes(' WARNING ');
+                const lines = data.lines.filter(l => lvl === 'all' || isErr(l) || (lvl === 'warn' && isWarn(l)));
+                pre.innerHTML = lines.length ? lines.map(l => '<div class="' + (isErr(l) ? 'lg-err' : isWarn(l) ? 'lg-warn' : '') + '">' + escapeHtml(l) + '</div>').join('') : '<div class="empty">' + (data.lines.length ? 'No matching lines.' : 'Log file empty.') + '</div>';
                 pre.scrollTop = pre.scrollHeight;
             } catch (err) { pre.textContent = 'Failed to load logs.'; }
         }
+        document.getElementById('log-level').addEventListener('change', loadLogs);
         document.getElementById('log-tail-toggle').addEventListener('change', function() {
             if (this.checked) { loadLogs(); _logTailInterval = setInterval(loadLogs, 5000); }
             else { clearInterval(_logTailInterval); _logTailInterval = null; }
@@ -648,6 +688,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 pollStatus();
             } catch (err) {
                 document.getElementById('reindex-status').textContent = 'Error: ' + err.message;
+                toast('Reindex failed: ' + err.message, 'error');
                 if (btn) { btn.disabled = false; btn.innerHTML = btn._origHtml; }
             }
         }
@@ -750,29 +791,39 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             } catch (err) { listDiv.innerHTML = '<div class="message error">' + escapeHtml(err.message) + '</div>'; }
         }
 
+        let _repoState = null;
         function renderRepos(allRepos, indexedList, indexedAt, errors = {}) {
+            _repoState = { allRepos, indexedList, indexedAt, errors };
             const listDiv = document.getElementById('repo-list');
-            if (!allRepos.length) { listDiv.innerHTML = '<div class="empty">No repos found.</div>'; return; }
+            const q = document.getElementById('repo-add-input').value.trim().toLowerCase();
             const indexedSet = new Set(indexedList);
-            const sorted = [...allRepos].sort((a, b) => { const ai = indexedSet.has(a) ? 0 : 1; const bi = indexedSet.has(b) ? 0 : 1; return ai - bi || a.localeCompare(b); });
-            listDiv.innerHTML = sorted.map(repo => {
+            const match = r => !q || r.toLowerCase().includes(q);
+            const tracked = allRepos.filter(r => indexedSet.has(r) && match(r)).sort((a, b) => a.localeCompare(b));
+            const avail = allRepos.filter(r => !indexedSet.has(r) && match(r)).sort((a, b) => a.localeCompare(b));
+            const row = repo => {
                 const isTracked = indexedSet.has(repo);
                 const name = repo.split('/')[1];
                 const hasIndexedAt = isTracked && !!indexedAt[name];
                 const age = hasIndexedAt ? timeAgo(indexedAt[name]) : '';
                 const err = isTracked ? errors[name] : '';
                 const errHtml = err ? '<div class="repo-error" title="' + escapeHtml(err) + '"><span class="repo-badge">index failed</span>' + escapeHtml(err.slice(0, 300)) + '</div>' : '';
+                const status = hasIndexedAt ? '<div class="repo-meta"><span class="repo-badge">indexed</span><span class="repo-age">' + escapeHtml(age) + '</span></div>' : (isTracked && !err ? '<div class="repo-meta"><span class="repo-age">not indexed yet</span></div>' : '');
                 const ic = n => '<svg class="ico"><use href="#i-' + n + '"/></svg>';
                 const actions = isTracked
-                    ? '<button class="ib repo-reindex-btn" title="Reindex ' + escapeHtml(name) + '">' + ic('refresh') + '</button><button class="ib del repo-remove-btn" title="Remove ' + escapeHtml(name) + ' from the index">' + ic('trash') + '</button>'
-                    : '<button class="ib repo-add-btn" title="Add ' + escapeHtml(name) + ' to the index">' + ic('plus') + '</button>';
-                return '<div class="repo-item' + (isTracked ? '' : ' untracked') + '" data-repo="' + escapeHtml(repo) + '"><div class="repo-info"><span class="repo-name">' + escapeHtml(repo) + '</span>' + (hasIndexedAt ? '<div class="repo-meta"><span class="repo-badge">indexed</span><span class="repo-age">' + escapeHtml(age) + '</span></div>' : '') + errHtml + '</div><div class="repo-actions">' + actions + '</div></div>';
-            }).join('');
+                    ? '<button class="ib repo-reindex-btn" title="Reindex ' + escapeHtml(name) + '">' + ic('refresh') + '</button><button class="ib del repo-remove-btn" title="Stop tracking ' + escapeHtml(name) + '">' + ic('trash') + '</button>'
+                    : '<button class="ib repo-add-btn" title="Track and index ' + escapeHtml(name) + '">' + ic('plus') + '</button>';
+                return '<div class="repo-item' + (isTracked ? '' : ' untracked') + '" data-repo="' + escapeHtml(repo) + '"><div class="repo-info"><span class="repo-name">' + escapeHtml(repo) + '</span>' + status + errHtml + '</div><div class="repo-actions">' + actions + '</div></div>';
+            };
+            let html = '<div class="section-title">Tracked (' + tracked.length + ')</div>';
+            html += tracked.length ? tracked.map(row).join('') : '<div class="empty">' + (q ? 'No tracked repo matches "' + escapeHtml(q) + '".' : 'Nothing tracked yet. Type owner/name above, or pick a repo from the list below.') + '</div>';
+            if (avail.length) html += '<details class="avail"' + (q || !indexedList.length ? ' open' : '') + '><summary class="section-title">Available on GitHub (' + avail.length + ')</summary>' + avail.map(row).join('') + '</details>';
+            listDiv.innerHTML = html;
             listDiv.querySelectorAll('.repo-reindex-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; const name = repo.split('/')[1]; btn.disabled = true; try { await triggerReindex(false, true, name); showRepoMsg('Reindexing ' + name + '...', 'info'); } catch (err) { showRepoMsg(err.message, 'error'); } finally { btn.disabled = false; } }); });
-            listDiv.querySelectorAll('.repo-remove-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; if (!confirm('Stop tracking ' + repo + '?')) return; try { const data = await api('/api/repos/' + encodeURIComponent(repo), { method: 'DELETE' }); renderRepos(allRepos, data.repos || [], indexedAt, errors); showRepoMsg('Removed ' + repo.split('/')[1] + ' from index', 'info'); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); } }); });
+            listDiv.querySelectorAll('.repo-remove-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; if (!await confirmDialog('Stop tracking ' + repo + '?', 'Stop tracking')) return; try { const data = await api('/api/repos/' + encodeURIComponent(repo), { method: 'DELETE' }); renderRepos(allRepos, data.repos || [], indexedAt, errors); showRepoMsg('Removed ' + repo.split('/')[1] + ' from index', 'info'); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); } }); });
             listDiv.querySelectorAll('.repo-add-btn').forEach(btn => { btn.addEventListener('click', async () => { const repo = btn.closest('.repo-item').dataset.repo; btn.disabled = true; try { const data = await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo }) }); renderRepos(allRepos, data.repos || [], indexedAt, errors); const name = repo.split('/')[1]; showRepoMsg('Added ' + name + ' — indexing...', 'info'); await triggerReindex(false, true, name); loadRepoFilter(); } catch (err) { showRepoMsg(err.message, 'error'); btn.disabled = false; } }); });
         }
 
+        document.getElementById('repo-add-input').addEventListener('input', () => { if (_repoState) { const st = _repoState; renderRepos(st.allRepos, st.indexedList, st.indexedAt, st.errors); } });
         document.getElementById('repo-add-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const input = document.getElementById('repo-add-input');
@@ -803,11 +854,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             try { renderTokenStatus(await api('/api/settings')); }
             catch (err) { document.getElementById('token-status').textContent = 'Error: ' + err.message; }
         }
-        function showTokenMsg(msg, type) {
-            const div = document.getElementById('token-message');
-            div.innerHTML = '<div class="message ' + type + '">' + escapeHtml(msg) + '</div>';
-            setTimeout(() => { div.innerHTML = ''; }, 5000);
-        }
+        function showTokenMsg(msg, type) { toast(msg, type); }
         document.getElementById('token-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const input = document.getElementById('token-input');
@@ -825,11 +872,56 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             catch (err) { showTokenMsg(err.message, 'error'); }
         });
 
-        function showRepoMsg(msg, type) {
-            const div = document.getElementById('repo-message');
-            div.innerHTML = '<div class="message ' + type + '">' + escapeHtml(msg) + '</div>';
-            setTimeout(() => { div.innerHTML = ''; }, 4000);
+        function showRepoMsg(msg, type) { toast(msg, type); }
+
+        function toast(msg, type = 'info') {
+            const t = document.createElement('div');
+            t.className = 'toast ' + type;
+            t.textContent = msg;
+            document.getElementById('toasts').appendChild(t);
+            setTimeout(() => t.classList.add('out'), type === 'error' ? 6000 : 3500);
+            setTimeout(() => t.remove(), type === 'error' ? 6400 : 3900);
         }
+        function confirmDialog(msg, okLabel = 'Confirm', danger = true) {
+            return new Promise(resolve => {
+                const m = document.getElementById('confirm-modal');
+                const ok = m.querySelector('.cm-ok'), cancel = m.querySelector('.cm-cancel');
+                m.querySelector('.cm-msg').textContent = msg;
+                ok.textContent = okLabel;
+                ok.className = 'cm-ok' + (danger ? ' danger' : '');
+                const done = v => { m.style.display = 'none'; ok.onclick = cancel.onclick = m.onclick = null; resolve(v); };
+                ok.onclick = () => done(true);
+                cancel.onclick = () => done(false);
+                m.onclick = e => { if (e.target === m) done(false); };
+                m.style.display = 'flex';
+                ok.focus();
+            });
+        }
+        function copyBtn(text) {
+            return '<button class="ib" data-copy="' + escapeHtml(text) + '" title="Copy ' + escapeHtml(text) + '"><svg class="ico"><use href="#i-copy"/></svg></button>';
+        }
+        function copyText(text) {
+            const fallback = () => {
+                const a = document.createElement('textarea'); a.value = text; document.body.appendChild(a); a.select();
+                try { document.execCommand('copy'); toast('Copied'); } catch (_) { toast('Copy failed', 'error'); }
+                a.remove();
+            };
+            if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Copied ' + (text.length > 60 ? text.slice(0, 57) + '...' : text)), fallback);
+            else fallback();
+        }
+        document.addEventListener('click', e => { const b = e.target.closest('[data-copy]'); if (b) copyText(b.dataset.copy); });
+
+        const connectCmd = 'claude mcp add cortex --transport sse ' + window.location.origin + '/sse';
+        document.getElementById('connect-cmd').textContent = connectCmd;
+        document.getElementById('connect-copy').addEventListener('click', () => copyText(connectCmd));
+
+        document.getElementById('sign-out').addEventListener('click', async () => {
+            if (!await confirmDialog('Sign out in this browser? You will see the login page next.', 'Sign out', false)) return;
+            localStorage.removeItem('cortex_token');
+            localStorage.removeItem('cortex_refresh');
+            oauthStarted = false;
+            startOAuthFlow();
+        });
 
         const GRAPH_COLORS = ['#a78bfa','#34d399','#f87171','#fbbf24','#60a5fa','#f472b6','#4ade80','#fb923c','#38bdf8','#e879f9'];
         let _sim = null;
@@ -993,12 +1085,19 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         function closeHistoryModal() {
             document.getElementById('history-modal').style.display = 'none';
         }
-        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeHistoryModal(); });
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Escape') return;
+            closeHistoryModal();
+            const cm = document.getElementById('confirm-modal');
+            if (cm.style.display === 'flex') cm.querySelector('.cm-cancel').click();
+        });
     </script>
+    <div id="toasts" aria-live="polite"></div>
+    <div id="confirm-modal" class="modal"><div class="modal-box"><div class="cm-msg"></div><div class="cm-row"><button class="cm-cancel secondary">Cancel</button><button class="cm-ok">Confirm</button></div></div></div>
     <div id="history-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;width:90%;max-width:540px;max-height:80vh;overflow-y:auto">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-          <span style="font-weight:700;font-size:0.95rem">Past Versions</span>
+          <span style="font-weight:700;font-size:0.95rem">Past versions</span>
           <button onclick="closeHistoryModal()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem;line-height:1">&#x2715;</button>
         </div>
         <table class="webhook-table" style="width:100%"><tbody id="history-modal-body"></tbody></table>
