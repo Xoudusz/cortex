@@ -490,9 +490,12 @@ async def authorize_post(request: Request) -> HTMLResponse | RedirectResponse | 
         lock = _user_locks.setdefault((username, ip), asyncio.Lock())
         if lock.locked():
             return bad("Too many failed attempts. Try again in a minute.", 429)
-        async with lock:
-            await asyncio.sleep(_user_delay(username))
-            ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
+        try:
+            async with lock:
+                await asyncio.sleep(_user_delay(username))
+                ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
+        finally:
+            _user_locks.pop((username, ip), None)  # no lingering entries: memory stays bounded
     else:
         ok = await run_in_threadpool(_users.check_login, username, password, ADMIN_PASSWORD)
     if not ok:
