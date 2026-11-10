@@ -42,11 +42,10 @@ def _verify_webhook_sig(body: bytes, sig_header: str) -> bool:
 
 def _webhook_targets(full_name: str) -> tuple[list, list]:
     """(workspaces tracking the repo as code, workspaces using it as their wiki) for a pushed owner/name."""
-    name = full_name.split("/")[-1]
     code_ws, wiki_ws = [], []
     for ws in ["default"] + sorted(_users.list_registered()):
         repos = _load_repos(ws)
-        if full_name in repos or (name and name in [r.split("/")[-1] for r in repos]):
+        if full_name and full_name.lower() in [r.lower() for r in repos]:
             code_ws.append(ws)
         if ws != "default" and full_name and _users.get_wiki(ws).lower() == full_name.lower():
             wiki_ws.append(ws)
@@ -228,6 +227,34 @@ async def _api_github_repos(request: Request) -> JSONResponse:
         return JSONResponse({"repos": repos})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def _api_github_repo_check(request: Request) -> JSONResponse:
+    """[admin] GET ?repo=owner/name: does the GitHub token see this repo? Validates format before any network call."""
+    repo = request.query_params.get("repo", "").strip()
+    if repo.startswith("https://github.com/"):
+        repo = repo[len("https://github.com/"):]
+    repo = repo.rstrip("/")
+    if repo.endswith(".git"):
+        repo = repo[:-len(".git")]
+    # valid_repo allows "." / ".." segments; reject them so the URL can't climb out of /repos/
+    if not _users.valid_repo(repo) or any(p.startswith(".") for p in repo.split("/")):
+        return JSONResponse({"error": "Use owner/name format"}, status_code=400)
+    token, _ = get_github_token()
+    if not token:
+        return JSONResponse({"error": "No GitHub token configured"}, status_code=503)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"https://api.github.com/repos/{repo}", headers=_gh_headers(token))
+        if resp.status_code == 200:
+            j = resp.json()
+            return JSONResponse({"exists": True, "full_name": j["full_name"], "private": j["private"],
+                                 "archived": j.get("archived", False)})
+        if resp.status_code == 404:
+            return JSONResponse({"exists": False})
+        return JSONResponse({"error": f"GitHub returned {resp.status_code}"}, status_code=502)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
 
 
 def _token_info(token: str, source: str) -> dict:

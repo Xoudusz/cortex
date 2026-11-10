@@ -32,6 +32,8 @@ Auth: built-in OAuth 2.0 (Bearer token). Login at `/oauth/authorize` with userna
 - `GET /api/stats` — collection counts + ollama status
 - `GET|PUT|DELETE /api/settings` — GitHub token status / set (validated against GitHub, stored in `data/settings.json` 0600, overrides env) / clear. Never returns the token
 - `GET /api/github/repos` — owner + collaborator + org repos, paginated
+- `GET /api/github/repo-check?repo=owner/name` — `{exists, full_name, private, archived}`; format (incl. `.`/`..` segments) rejected before any GitHub call
+- Dashboard scope: every admin `/api/*` call carries `X-Cortex-Workspace` (top-bar switcher, `localStorage.cortex_ws`); search, stats, repos, reindex, graph follow it
 
 **Unprotected endpoints:**
 - `GET /health` — healthchecks
@@ -73,7 +75,7 @@ server/
     Dockerfile          # multi-stage: dotnet/sdk:8.0-bookworm-slim builds CortexAnalyzer → python:3.12-slim
   indexer/              # code/notes indexers for server mode
     index.py            # notes indexer — heading-chunked, tags, modified_at
-    index_code.py       # code indexer — clone/pull, embed, upsert
+    index_code.py       # code indexer — clone/pull to REPOS_DIR/<owner>/<name>, embed, upsert
 local/                  # cortex PyPI package — pipx install, stdio MCP, no server needed
   pyproject.toml        # package metadata, entry point: cortex = cortex.cli:cli
   cortex/
@@ -127,7 +129,7 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 - `_enqueue()` coalesces same-repo incremental webhook jobs (merges file lists instead of queuing duplicate)
 - Watchdog debounces 60s before triggering notes reindex (env: `WATCH_DEBOUNCE`)
 - Code indexer clones repos with `config.get_github_token()` (dashboard setting > `GITHUB_TOKEN` env), passed to the subprocess env by `reindex._workspace_env()`
-- Multi-user: never read `_active_workspace` directly — use `state.get_active_workspace()` (per-user via contextvars). Binding happens in `_BearerTokenMiddleware` (HTTP; admin `/api/*` always binds `default`), `CortexMCP.call_tool` (MCP — SSE tools run outside the POST task, so the middleware binding never reaches them), and `_reindex_worker` (each job carries `ws`). A bound user with no workspace raises `PermissionError` instead of falling back to `default`
+- Multi-user: never read `_active_workspace` directly — use `state.get_active_workspace()` (per-user via contextvars). Binding happens in `_BearerTokenMiddleware` (HTTP; admin `/api/*` binds the dashboard switcher's `X-Cortex-Workspace` header if it names `default` or a registered workspace, else `default`), `CortexMCP.call_tool` (MCP — SSE tools run outside the POST task, so the middleware binding never reaches them), and `_reindex_worker` (each job carries `ws`). A bound user with no workspace raises `PermissionError` instead of falling back to `default`
 - `default` = admin's private workspace (vault + own repos), never grantable. Shared workspaces are code repos + optional wiki repo: notes reindex there clones the wiki (`reindex._sync_wiki`, auth via `http.extraheader`, not URL) and never reads `NOTES_PATH`
 - Webhook fans out: code job per workspace tracking the repo, notes job per workspace whose `wiki_repo` matches
 - Per-repo excludes: `core.chunker.repo_ignore_patterns()` (`.cortexignore` + `.gdignore` dirs); full reindex deletes chunks of gone/excluded files

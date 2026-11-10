@@ -195,6 +195,14 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         /* settings: connect card */
         .chip { display: inline-flex; align-items: center; gap: 0.2rem; background: var(--bg2); border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.25rem 0.1rem 0.6rem; font-size: 0.75rem; margin: 0 0.3rem 0.3rem 0; }
         .chip .ib { width: 20px; height: 20px; }
+        .picker { position: relative; flex: 1; min-width: 0; }
+        .picker > input { width: 100%; }
+        .picker-status { font-size: 0.75rem; color: var(--muted); margin-top: 0.3rem; }
+        .picker-status:empty { display: none; }
+        .picker-status.bad { color: var(--err); }
+        .picker-list { position: absolute; top: 100%; left: 0; right: 0; z-index: 50; margin-top: 2px; max-height: 17rem; overflow-y: auto; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+        .picker-item { padding: 0.45rem 0.75rem; font-size: 0.8rem; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .picker-item:hover, .picker-item.active { background: rgba(var(--acc-rgb),.14); color: var(--accent2); }
         .urow { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; border-top: 1px solid var(--line); padding: 0.55rem 0; }
         .urow b { min-width: 90px; }
         .cmd { display: flex; align-items: center; gap: 0.4rem; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 0.4rem 0.4rem 0.4rem 0.75rem; font-family: var(--mono); font-size: 0.76rem; margin: 0.5rem 0; }
@@ -248,6 +256,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <span class="hstat"><b id="stat-code">-</b>code chunks</span>
                 <span class="hstat"><span class="hdot" id="stat-ollama"></span>Ollama</span>
                 <span class="hstat" id="status-text"><span id="status-dot" class="status-dot"></span><span id="status-label">idle</span></span>
+                <select id="ws-switch" title="Workspace" style="display:none;max-width:12rem"></select>
                 <button class="ib" id="sign-out" title="Sign out"><svg class="ico"><use href="#i-logout"/></svg></button>
             </div>
         </div>
@@ -286,6 +295,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         </div>
 
         <div id="repos-panel" class="panel">
+            <div class="card-h" style="margin-bottom:0.6rem"><h3 id="repos-title">Repos</h3></div>
             <form id="repo-add-form" class="search-form">
                 <input id="repo-add-input" placeholder="Filter, or add owner/name" autocomplete="off">
                 <button type="submit"><svg class="ico"><use href="#i-plus"/></svg>Add repo</button>
@@ -342,21 +352,24 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             </div>
             <div id="admin-users" class="admin-section">
                 <div class="card">
-                    <div class="card-h"><h3>Shared workspaces</h3><span class="sub">own code + notes index; your vault stays private in <code>default</code></span></div>
+                    <div class="card-h"><h3>Current workspace</h3><span class="sub" id="ws-current-sub"></span></div>
+                    <div id="ws-current"></div>
+                </div>
+                <div class="card">
+                    <div class="card-h"><h3>New shared workspace</h3><span class="sub">own code + notes index; your vault stays private in <code>default</code></span></div>
                     <form id="ws-create-form" style="display:flex;gap:0.5rem;flex-wrap:wrap">
                         <input id="ws-name" placeholder="name, e.g. proj" autocomplete="off" style="flex:1;min-width:140px">
                         <input id="ws-wiki" placeholder="wiki repo owner/name (optional)" autocomplete="off" style="flex:2;min-width:200px">
                         <button type="submit"><svg class="ico"><use href="#i-plus"/></svg>Create</button>
                     </form>
                     <div class="hint" style="margin-top:0.5rem">The wiki repo is a GitHub repo of markdown files indexed as the workspace's notes; a push reindexes it (add the cortex webhook to it).</div>
-                    <div id="ws-list" style="margin-top:0.75rem"></div>
                 </div>
                 <div class="card">
                     <div class="card-h"><h3>Users</h3><span class="sub">invite links are single use and valid 7 days</span></div>
                     <form id="invite-form" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
                         <input id="invite-name" placeholder="username" autocomplete="off" style="flex:1;min-width:140px">
-                        <div id="invite-ws" class="toggles" style="margin:0"></div>
                         <button type="submit"><svg class="ico"><use href="#i-plus"/></svg>Invite</button>
+                        <span id="invite-hint" class="hint"></span>
                     </form>
                     <div id="invite-result"></div>
                     <div id="user-list" style="margin-top:0.75rem"></div>
@@ -428,10 +441,12 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             if (oauthStarted) return;
             oauthStarted = true;
             const verifier = generateVerifier();
+            // One verifier per login attempt, keyed by a random state, so two tabs never clobber each other.
+            const state = generateVerifier();
             crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)).then(hash => {
                 const challenge = btoa(String.fromCharCode(...new Uint8Array(hash)))
                     .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');
-                localStorage.setItem('cortex_pkce_verifier', verifier);
+                localStorage.setItem('cortex_pkce_' + state, JSON.stringify({ v: verifier, t: Date.now() }));
                 const redirectUri = window.location.origin + '/';
                 const params = new URLSearchParams({
                     response_type: 'code',
@@ -439,6 +454,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     redirect_uri: redirectUri,
                     code_challenge: challenge,
                     code_challenge_method: 'S256',
+                    state: state,
                 });
                 window.location.href = '/oauth/authorize?' + params.toString();
             });
@@ -493,9 +509,22 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             const code = params.get('code');
             if (code) {
                 history.replaceState({}, '', '/');
-                const verifier = localStorage.getItem('cortex_pkce_verifier');
+                const stateKey = 'cortex_pkce_' + (params.get('state') || '');
+                let verifier = '';
+                try { verifier = (JSON.parse(localStorage.getItem(stateKey) || 'null') || {}).v || ''; } catch (_) {}
+                localStorage.removeItem(stateKey);
                 localStorage.removeItem('cortex_pkce_verifier');
-                if (!verifier) { showAuthError('no PKCE verifier in this browser (opened in another tab?).'); return false; }
+                const cutoff = Date.now() - 10 * 60 * 1000;
+                Object.keys(localStorage).forEach(k => {
+                    if (k.indexOf('cortex_pkce_') !== 0) return;
+                    try { const s = JSON.parse(localStorage.getItem(k) || 'null'); if (!s || !s.t || s.t < cutoff) localStorage.removeItem(k); }
+                    catch (_) { localStorage.removeItem(k); }
+                });
+                if (!verifier) {
+                    // Another tab already finished this login: keep its token instead of erroring.
+                    if (getToken()) return true;
+                    showAuthError('no PKCE verifier in this browser (opened in another tab?).'); return false;
+                }
                 try {
                     const res = await fetch('/token', {
                         method: 'POST',
@@ -526,10 +555,13 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             return false;
         })();
 
+        // Workspace picked in the header switcher; the server scopes admin /api/* calls to it.
+        function currentWs() { return localStorage.getItem('cortex_ws') || 'default'; }
+
         async function api(path, options = {}, retried = false) {
             await authReady;
             const token = getToken();
-            const headers = { 'Content-Type': 'application/json', ...options.headers };
+            const headers = { 'Content-Type': 'application/json', 'X-Cortex-Workspace': currentWs(), ...options.headers };
             if (token) headers['Authorization'] = 'Bearer ' + token;
             const res = await fetch(path, { ...options, headers });
             if (res.status === 401) {
@@ -560,8 +592,30 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             const cmd = 'claude mcp add cortex --transport sse ' + window.location.origin + '/sse';
             document.getElementById('mv-cmd').textContent = cmd;
             document.getElementById('mv-copy').addEventListener('click', () => copyText(cmd));
+            document.getElementById('ws-switch').style.display = 'none';
             return false;
         })();
+
+        // Header workspace switcher (admins). Options: default (private) + shared workspaces.
+        function switchWs(ws) { localStorage.setItem('cortex_ws', ws); location.reload(); }
+        async function loadWsSwitcher() {
+            const sel = document.getElementById('ws-switch');
+            try {
+                const data = await api('/api/workspaces');
+                if (!data) return;
+                const names = (data.workspaces || []).map(w => w.name);
+                const cur = currentWs();
+                // Stored workspace was deleted or never existed here: fall back to default once.
+                if (cur !== 'default' && !names.includes(cur)) { localStorage.setItem('cortex_ws', 'default'); location.reload(); return; }
+                sel.innerHTML = '<option value="default">default (private)</option>' +
+                    names.map(n => '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>').join('');
+                sel.value = cur;
+                sel.style.display = '';
+                sel.onchange = () => switchWs(sel.value);
+                document.getElementById('repos-title').textContent = 'Repos · ' + cur;
+            } catch (err) { toast(err.message, 'error'); }
+        }
+        roleReady.then(isAdmin => { if (isAdmin) loadWsSwitcher(); });
 
         function escapeHtml(str) {
             return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -944,17 +998,134 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         document.getElementById('repo-add-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const input = document.getElementById('repo-add-input');
-            const repo = input.value.trim().replace(/^https:[/][/]github.com[/]/, '').replace(/[.]git$/, '');
+            const repo = normalizeRepoInput(input.value);
             const parts = repo.split('/');
             if (parts.length !== 2 || !parts[0] || !parts[1]) { showRepoMsg('Use owner/name', 'error'); return; }
             try {
                 await api('/api/repos', { method: 'POST', body: JSON.stringify({ repo }) });
                 input.value = '';
+                repoAddPicker.reset();
                 showRepoMsg('Added ' + repo + ' - indexing...', 'info');
                 await triggerReindex(false, true, parts[1]);
                 loadRepos(); loadRepoFilter();
             } catch (err) { showRepoMsg(err.message, 'error'); }
         });
+
+        // ---- Repo picker: suggestions from GitHub + existence check before submit ----
+        function normalizeRepoInput(v) {
+            return String(v || '').trim().replace(/^https?:[/][/]github[.]com[/]/, '').replace(/[.]git$/, '').replace(/[/]+$/, '');
+        }
+        function looksLikeRepo(v) { return /^[A-Za-z0-9_-][A-Za-z0-9_.-]*[/][A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(v); }
+        let _ghRepoNames = null;
+        function loadGhRepoNames() {
+            if (!_ghRepoNames) {
+                _ghRepoNames = api('/api/github/repos').then(r => (r && r.repos) || []).catch(err => { _ghRepoNames = null; throw err; });
+            }
+            return _ghRepoNames;
+        }
+        // opts.allowEmpty: an empty value is valid (clears the field), e.g. the wiki repo.
+        function attachRepoPicker(input, submitBtn, opts = {}) {
+            const wrap = document.createElement('div');
+            wrap.className = 'picker';
+            wrap.style.flex = input.style.flex;
+            wrap.style.minWidth = input.style.minWidth;
+            input.style.flex = ''; input.style.minWidth = '';
+            input.parentNode.insertBefore(wrap, input);
+            wrap.appendChild(input);
+            const status = document.createElement('div');
+            status.className = 'picker-status';
+            const list = document.createElement('div');
+            list.className = 'picker-list';
+            list.style.display = 'none';
+            wrap.append(status, list);
+            let items = [], active = -1, timer = null, seq = 0;
+            const current = () => normalizeRepoInput(input.value);
+            const setSubmit = ok => { if (submitBtn) submitBtn.disabled = !ok; };
+            const hideList = () => { list.style.display = 'none'; active = -1; };
+            function setActive(i) {
+                active = i;
+                const els = list.querySelectorAll('.picker-item');
+                els.forEach((el, j) => el.classList.toggle('active', j === i));
+                if (els[i]) els[i].scrollIntoView({ block: 'nearest' });
+            }
+            async function openList() {
+                let names;
+                try { names = await loadGhRepoNames(); } catch (_) { hideList(); return; }
+                const q = current().toLowerCase();
+                items = names.filter(r => r.toLowerCase().includes(q));
+                active = -1;
+                if (!items.length) { hideList(); return; }
+                list.innerHTML = items.map((r, i) => '<div class="picker-item" data-i="' + i + '">' + escapeHtml(r) + '</div>').join('');
+                list.style.display = 'block';
+            }
+            function setStatus(text, ok, bad) {
+                status.textContent = text;
+                status.classList.toggle('bad', !!bad);
+            }
+            async function check(v) {
+                const mine = ++seq;
+                setSubmit(false);
+                setStatus('checking...', false, false);
+                try {
+                    const r = await api('/api/github/repo-check?repo=' + encodeURIComponent(v));
+                    if (mine !== seq || v !== current() || !r) return;
+                    if (!r.exists) { setStatus('✗ not found', false, true); setSubmit(false); return; }
+                    setStatus('✓ exists' + (r.private ? ' (private)' : '') + (r.archived ? ' (archived)' : ''), false, false);
+                    setSubmit(true);
+                } catch (err) {
+                    // GitHub or the token is unavailable: let the user try anyway, the server reports the real error.
+                    if (mine !== seq || v !== current()) return;
+                    setStatus("⚠ can't check (" + err.message + ')', false, false);
+                    setSubmit(true);
+                }
+            }
+            function scheduleCheck() {
+                clearTimeout(timer);
+                seq++;
+                const v = current();
+                if (!v) { setStatus('', false, false); setSubmit(!!opts.allowEmpty); return; }
+                // the already-saved value needs no GitHub round-trip and must stay saveable
+                if (opts.saved && v === opts.saved) { setStatus('', false, false); setSubmit(true); return; }
+                if (!looksLikeRepo(v)) { setStatus('', false, false); setSubmit(false); return; }
+                setSubmit(false);
+                timer = setTimeout(() => check(v), 400);
+            }
+            function pick(repo) {
+                input.value = repo;
+                hideList();
+                clearTimeout(timer);
+                check(current());
+            }
+            input.addEventListener('focus', openList);
+            // Tab/blur closes the list; row picks use mousedown + preventDefault, so they never blur first
+            input.addEventListener('blur', hideList);
+            input.addEventListener('input', () => { openList(); scheduleCheck(); });
+            input.addEventListener('keydown', e => {
+                const open = list.style.display !== 'none' && items.length > 0;
+                if (e.key === 'Escape' && open) { e.preventDefault(); hideList(); }
+                else if (e.key === 'ArrowDown' && open) { e.preventDefault(); setActive((active + 1) % items.length); }
+                else if (e.key === 'ArrowUp' && open) { e.preventDefault(); setActive(active <= 0 ? items.length - 1 : active - 1); }
+                else if (e.key === 'Enter' && open && active >= 0) { e.preventDefault(); pick(items[active]); }
+            });
+            // mousedown keeps focus in the input; the click then picks the row.
+            list.addEventListener('mousedown', e => {
+                const it = e.target.closest('.picker-item');
+                if (!it) return;
+                e.preventDefault();
+                pick(items[+it.dataset.i]);
+            });
+            // re-rendered panels drop their pickers: the listener removes itself once its wrapper is gone
+            const onDocClick = e => {
+                if (!wrap.isConnected) { document.removeEventListener('click', onDocClick); return; }
+                if (!wrap.contains(e.target)) hideList();
+            };
+            document.addEventListener('click', onDocClick);
+            scheduleCheck();
+            return {
+                reset() { clearTimeout(timer); seq++; hideList(); setStatus('', false, false); setSubmit(!!opts.allowEmpty); },
+            };
+        }
+        const repoAddPicker = attachRepoPicker(document.getElementById('repo-add-input'), document.querySelector('#repo-add-form button[type=submit]'));
 
         function renderTokenStatus(info) {
             const el = document.getElementById('token-status');
@@ -1051,32 +1222,56 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 renderUsers(u.users || [], u.invites || []);
             } catch (err) { toast(err.message, 'error'); }
         }
+        function updateInviteHint() {
+            const ws = currentWs();
+            document.getElementById('invite-hint').textContent = ws === 'default'
+                ? 'joins no workspace (switch to a shared one first)' : 'joins ' + ws;
+        }
         function renderWorkspaces(list) {
             _wsNames = list.map(w => w.name);
-            document.getElementById('invite-ws').innerHTML = _wsNames.length
-                ? _wsNames.map(n => '<label class="toggle"><input type="checkbox" value="' + escapeHtml(n) + '"><span>' + escapeHtml(n) + '</span></label>').join('')
-                : '<span class="hint">create a workspace first</span>';
-            const el = document.getElementById('ws-list');
-            if (!list.length) { el.innerHTML = '<div class="empty">No shared workspaces yet.</div>'; return; }
-            el.innerHTML = list.map(w => {
-                const n = escapeHtml(w.name);
-                const repos = (w.repos || []).map(r => {
-                    const err = (w.errors || {})[r.split('/')[1]];
-                    const ok = (w.indexed_at || {})[r.split('/')[1]];
-                    const title = err ? escapeHtml(err) : (ok ? 'indexed ' + timeAgo(ok) : 'not indexed yet');
-                    return '<span class="chip" title="' + title + '">' + (err ? '! ' : '') + escapeHtml(r) +
-                        '<button class="ib ws-repo-rm" data-repo="' + escapeHtml(r) + '" title="Remove"><svg class="ico"><use href="#i-trash"/></svg></button></span>';
-                }).join('') || '<span class="hint">no code repos</span>';
-                return '<div class="card" style="margin-bottom:0.5rem;background:var(--bg2)" data-ws="' + n + '">' +
-                    '<div class="card-h"><h3>' + n + '</h3><span class="sub">members: ' + escapeHtml((w.members || []).join(', ') || 'none') + '</span>' +
-                    '<span class="push"><button class="secondary small ws-reindex">Reindex</button>' +
-                    '<button class="ib ws-del" title="Delete workspace"><svg class="ico"><use href="#i-trash"/></svg></button></span></div>' +
-                    '<form class="ws-wiki-form" style="display:flex;gap:0.4rem;margin-bottom:0.5rem;align-items:center"><span class="hint">wiki</span>' +
-                    '<input value="' + escapeHtml(w.wiki_repo || '') + '" placeholder="owner/name (notes)" style="flex:1"><button type="submit" class="secondary small">Save</button></form>' +
-                    '<div>' + repos + '</div>' +
-                    '<form class="ws-repo-add" style="display:flex;gap:0.4rem;margin-top:0.4rem"><input placeholder="add code repo owner/name" style="flex:1">' +
-                    '<button type="submit" class="secondary small">Add</button></form></div>';
-            }).join('');
+            updateInviteHint();
+            const ws = currentWs();
+            const sub = document.getElementById('ws-current-sub');
+            const el = document.getElementById('ws-current');
+            sub.textContent = ws;
+            if (ws === 'default') {
+                el.innerHTML = '<div class="hint">default is your private workspace: notes from your vault, code from the Repos tab.</div>';
+                return;
+            }
+            const w = list.find(x => x.name === ws);
+            // deleted meanwhile (e.g. by another tab): fall back to default instead of a dead card
+            if (!w) { switchWs('default'); return; }
+            const repos = (w.repos || []).map(r => {
+                const name = r.split('/')[1];
+                const err = (w.errors || {})[name];
+                const ok = (w.indexed_at || {})[name];
+                const title = err ? escapeHtml(err) : (ok ? 'indexed ' + timeAgo(ok) : 'not indexed yet');
+                return '<span class="chip" title="' + title + '">' + (err ? '! ' : '') + escapeHtml(r) + '</span>';
+            }).join('') || '<span class="hint">no code repos</span>';
+            el.innerHTML =
+                '<div class="hint">members: ' + escapeHtml((w.members || []).join(', ') || 'none') + '</div>' +
+                '<form id="ws-cur-wiki-form" style="display:flex;gap:0.4rem;margin:0.6rem 0;align-items:center;flex-wrap:wrap"><span class="hint">wiki</span>' +
+                '<input id="ws-cur-wiki" value="' + escapeHtml(w.wiki_repo || '') + '" placeholder="owner/name (notes)" autocomplete="off" style="flex:1;min-width:200px">' +
+                '<button type="submit" id="ws-cur-wiki-save" class="secondary small">Save</button></form>' +
+                '<div class="hint" style="margin-bottom:0.4rem">code repos (manage in the Repos tab):</div><div>' + repos + '</div>' +
+                '<div style="display:flex;gap:0.5rem;margin-top:0.75rem"><button id="ws-cur-reindex" class="secondary small">Reindex</button>' +
+                '<button id="ws-cur-del" class="danger small">Delete workspace</button></div>';
+            attachRepoPicker(document.getElementById('ws-cur-wiki'), document.getElementById('ws-cur-wiki-save'), { allowEmpty: true, saved: w.wiki_repo || '' });
+            document.getElementById('ws-cur-wiki-form').addEventListener('submit', e => {
+                e.preventDefault();
+                const val = normalizeRepoInput(document.getElementById('ws-cur-wiki').value);
+                usersAction(() => api('/api/workspaces/' + enc(ws), { method: 'PUT', body: JSON.stringify({ wiki_repo: val }) }), 'Wiki saved. Reindex to pick it up.');
+            });
+            document.getElementById('ws-cur-reindex').addEventListener('click', () =>
+                usersAction(() => api('/api/workspaces/' + enc(ws) + '/reindex', { method: 'POST', body: JSON.stringify({ notes: true, code: true }) }), 'Reindex queued for ' + ws));
+            document.getElementById('ws-cur-del').addEventListener('click', async () => {
+                if (!await confirmDialog('Delete workspace ' + ws + '? Members lose access; indexed data stays on disk.', 'Delete')) return;
+                try {
+                    await api('/api/workspaces/' + enc(ws), { method: 'DELETE' });
+                    localStorage.setItem('cortex_ws', 'default');
+                    location.reload();
+                } catch (err) { toast(err.message, 'error'); }
+            });
         }
         function renderUsers(users, invites) {
             const el = document.getElementById('user-list');
@@ -1100,34 +1295,27 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             try { const r = await fn(); if (r === undefined) return; if (okMsg) toast(okMsg); loadUsersPanel(); }
             catch (err) { toast(err.message, 'error'); }
         }
-        document.getElementById('ws-create-form').addEventListener('submit', e => {
+        updateInviteHint();
+        const wsWikiPicker = attachRepoPicker(document.getElementById('ws-wiki'), document.querySelector('#ws-create-form button[type=submit]'), { allowEmpty: true });
+        document.getElementById('ws-create-form').addEventListener('submit', async e => {
             e.preventDefault();
-            const name = document.getElementById('ws-name').value.trim(), wiki = document.getElementById('ws-wiki').value.trim();
-            usersAction(() => api('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, wiki_repo: wiki }) }), 'Workspace ' + name + ' created');
-            document.getElementById('ws-name').value = ''; document.getElementById('ws-wiki').value = '';
-        });
-        document.getElementById('ws-list').addEventListener('click', async e => {
-            const card = e.target.closest('[data-ws]'); if (!card) return;
-            const ws = card.dataset.ws;
-            if (e.target.closest('.ws-reindex')) usersAction(() => api('/api/workspaces/' + enc(ws) + '/reindex', { method: 'POST', body: JSON.stringify({ notes: true, code: true }) }), 'Reindex queued for ' + ws);
-            const rm = e.target.closest('.ws-repo-rm');
-            if (rm && await confirmDialog('Stop tracking ' + rm.dataset.repo + ' in ' + ws + '?', 'Remove'))
-                usersAction(() => api('/api/workspaces/' + enc(ws) + '/repos/' + rm.dataset.repo, { method: 'DELETE' }), 'Removed');
-            if (e.target.closest('.ws-del') && await confirmDialog('Delete workspace ' + ws + '? Members lose access; indexed data stays on disk.', 'Delete'))
-                usersAction(() => api('/api/workspaces/' + enc(ws), { method: 'DELETE' }), 'Workspace deleted');
-        });
-        document.getElementById('ws-list').addEventListener('submit', e => {
-            e.preventDefault();
-            const card = e.target.closest('[data-ws]'); const ws = card.dataset.ws; const val = e.target.querySelector('input').value.trim();
-            if (e.target.classList.contains('ws-wiki-form'))
-                usersAction(() => api('/api/workspaces/' + enc(ws), { method: 'PUT', body: JSON.stringify({ wiki_repo: val }) }), 'Wiki saved. Reindex to pick it up.');
-            if (e.target.classList.contains('ws-repo-add'))
-                usersAction(() => api('/api/workspaces/' + enc(ws) + '/repos', { method: 'POST', body: JSON.stringify({ repo: val }) }), 'Added ' + val);
+            const name = document.getElementById('ws-name').value.trim();
+            const wiki = normalizeRepoInput(document.getElementById('ws-wiki').value);
+            try {
+                await api('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, wiki_repo: wiki }) });
+            } catch (err) { toast(err.message, 'error'); return; }
+            document.getElementById('ws-name').value = '';
+            document.getElementById('ws-wiki').value = '';
+            wsWikiPicker.reset();
+            toast('Workspace ' + name + ' created');
+            if (await confirmDialog('Switch to ' + name + ' now?', 'Switch', false)) switchWs(name);
+            else { loadUsersPanel(); loadWsSwitcher(); }
         });
         document.getElementById('invite-form').addEventListener('submit', async e => {
             e.preventDefault();
             const username = document.getElementById('invite-name').value.trim();
-            const workspaces = [...document.querySelectorAll('#invite-ws input:checked')].map(c => c.value);
+            const ws = currentWs();
+            const workspaces = ws === 'default' ? [] : [ws];
             try {
                 const r = await api('/api/invites', { method: 'POST', body: JSON.stringify({ username, workspaces }) });
                 if (!r) return;

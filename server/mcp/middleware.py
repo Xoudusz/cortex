@@ -16,6 +16,20 @@ log = logging.getLogger("cortex")
 bearer_token = _oauth.bearer_token
 
 
+def _dashboard_ws(scope) -> str:
+    """Workspace picked in the dashboard switcher (x-cortex-workspace); "default" if missing or unknown."""
+    ws = ""
+    for k, v in scope.get("headers", []):
+        if k == b"x-cortex-workspace":
+            ws = v.decode("latin-1").strip()
+            break
+    if ws == "default" or (ws and ws in _users.list_registered()):
+        return ws
+    if ws:
+        log.debug("[dashboard] unknown workspace %r in x-cortex-workspace, using default", ws)
+    return "default"
+
+
 class _BearerTokenMiddleware:
     """Enforce Bearer token authentication on all protected routes and bind the caller.
 
@@ -53,9 +67,10 @@ class _BearerTokenMiddleware:
         if path.startswith("/api/") and path not in self._MEMBER_API and not _users.is_admin(user):
             await JSONResponse({"error": "admin only"}, status_code=403)(scope, receive, send)
             return
-        # The dashboard API always works on the admin's own "default" workspace (shared workspaces have
-        # explicit /api/workspaces/{name}/... routes), independent of the workspace picked in MCP.
-        ws = "default" if path.startswith("/api/") and _users.is_admin(user) else None
+        # Admin dashboard API: bind the workspace chosen in the dashboard switcher (x-cortex-workspace header),
+        # falling back to "default" when the header is missing or names an unknown workspace. Shared workspaces
+        # also have explicit /api/workspaces/{name}/... routes. Members and non-/api paths keep ws=None.
+        ws = _dashboard_ws(scope) if path.startswith("/api/") and _users.is_admin(user) else None
         tokens = _state.bind_request(user, ws)
         try:
             await self.app(scope, receive, send)
