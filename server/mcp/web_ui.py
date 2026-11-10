@@ -8,6 +8,8 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue, Prefetch, F
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
+from config import collection_name
+from state import get_active_workspace
 from template import LOGO_SVG, UI_HTML  # noqa: F401 (LOGO_SVG re-exported for favicon route)
 
 
@@ -29,6 +31,8 @@ async def api_search(request: Request, qdrant_url: str, embed_fn, sparse_embed_f
     limit = min(body.get("limit", 10), 50)
     repo_filter = body.get("repo", "").strip()
     client = QdrantClient(url=qdrant_url)
+    ws = get_active_workspace()
+    notes_col, code_col = collection_name("notes", ws), collection_name("code", ws)
     vector = embed_fn(query)
     sparse = sparse_embed_fn(query) if sparse_embed_fn else None
     result = {}
@@ -38,7 +42,7 @@ async def api_search(request: Request, qdrant_url: str, embed_fn, sparse_embed_f
                 idx, vals = sparse
                 try:
                     points = client.query_points(
-                        "notes",
+                        notes_col,
                         prefetch=[
                             Prefetch(query=vector, using=None, limit=limit * 2),
                             Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2),
@@ -48,9 +52,9 @@ async def api_search(request: Request, qdrant_url: str, embed_fn, sparse_embed_f
                         with_payload=True,
                     ).points
                 except Exception:
-                    points = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
+                    points = client.query_points(notes_col, query=vector, limit=limit, with_payload=True).points
             else:
-                points = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
+                points = client.query_points(notes_col, query=vector, limit=limit, with_payload=True).points
             result["notes"] = [{"file": p.payload.get("file", ""), "heading": p.payload.get("heading", ""), "text": p.payload.get("text", ""), "tags": p.payload.get("tags", []), "score": round(p.score, 4)} for p in points]
         except Exception as e:
             result["notes"] = []; result["notes_error"] = str(e)
@@ -61,7 +65,7 @@ async def api_search(request: Request, qdrant_url: str, embed_fn, sparse_embed_f
                 idx, vals = sparse
                 try:
                     points = client.query_points(
-                        "code",
+                        code_col,
                         prefetch=[
                             Prefetch(query=vector, using=None, limit=limit * 2, filter=q_filter),
                             Prefetch(query=SparseVector(indices=idx, values=vals), using="sparse", limit=limit * 2, filter=q_filter),
@@ -71,9 +75,9 @@ async def api_search(request: Request, qdrant_url: str, embed_fn, sparse_embed_f
                         with_payload=True,
                     ).points
                 except Exception:
-                    points = client.query_points("code", query=vector, limit=limit, with_payload=True, query_filter=q_filter).points
+                    points = client.query_points(code_col, query=vector, limit=limit, with_payload=True, query_filter=q_filter).points
             else:
-                points = client.query_points("code", query=vector, limit=limit, with_payload=True, query_filter=q_filter).points
+                points = client.query_points(code_col, query=vector, limit=limit, with_payload=True, query_filter=q_filter).points
             result["code"] = [{"repo": p.payload.get("repo", ""), "file": p.payload.get("file", ""), "start_line": p.payload.get("start_line", 0), "end_line": p.payload.get("end_line", 0), "language": p.payload.get("language", ""), "text": p.payload.get("text", ""), "github_url": p.payload.get("github_url", ""), "score": round(p.score, 4)} for p in points]
         except Exception as e:
             result["code"] = []; result["code_error"] = str(e)
@@ -99,14 +103,16 @@ async def api_stats(request: Request, qdrant_url: str, ollama_url: str, graph_st
     """Return Qdrant collection point counts, Ollama status, and optional graph stats payload."""
     client = QdrantClient(url=qdrant_url)
     result = {}
-    try:
-        info = client.get_collection("notes"); result["notes"] = {"points_count": info.points_count}
-    except Exception as e:
-        result["notes"] = {"error": str(e)}
-    try:
-        info = client.get_collection("code"); result["code"] = {"points_count": info.points_count}
-    except Exception as e:
-        result["code"] = {"error": str(e)}
+    ws = get_active_workspace()
+    for key in ("notes", "code"):
+        name = collection_name(key, ws)
+        try:
+            if not client.collection_exists(name):  # shared workspace not indexed yet
+                result[key] = {"points_count": 0}
+                continue
+            info = client.get_collection(name); result[key] = {"points_count": info.points_count}
+        except Exception as e:
+            result[key] = {"error": str(e)}
     try:
         resp = httpx.get(f"{ollama_url}/api/tags", timeout=5)
         result["ollama"] = {"status": "ok" if resp.status_code == 200 else "error"}

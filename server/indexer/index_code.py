@@ -118,9 +118,16 @@ def _delete_file_points(client, repo_name: str, rel: str) -> None:
         print(f"  warn: delete {rel}: {e}", flush=True)
 
 
+def _clone_dest(repo: str) -> Path:
+    """Clone location keyed by owner/name so same-named repos from different owners don't collide."""
+    owner, name = repo.split("/")[0], repo.split("/")[1]
+    return REPOS_DIR / owner / name
+
+
 def clone_or_pull(repo: str) -> Path:
     name = repo.split("/")[1]
-    dest = REPOS_DIR / name
+    dest = _clone_dest(repo)
+    dest.parent.mkdir(parents=True, exist_ok=True)
     auth_url = f"https://Xoudusz:{TOKEN}@github.com/{repo}.git"
     if dest.exists():
         print(f"  pulling {repo}...", flush=True)
@@ -348,9 +355,9 @@ def main():
         try:
             import graph as _graph
             repo_paths_map = {
-                r.split("/")[1]: REPOS_DIR / r.split("/")[1]
+                r.split("/")[1]: _clone_dest(r)
                 for r in repos
-                if (REPOS_DIR / r.split("/")[1]).exists()
+                if _clone_dest(r).exists()
             }
             _graph.build_global_graph(repo_paths_map, DATA_DIR)
         except Exception as e:

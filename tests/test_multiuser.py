@@ -309,6 +309,192 @@ def test_untrusted_private_peer_cannot_spoof_when_proxies_pinned():
         oauth.TRUSTED_PROXIES = saved
 
 
+def test_dashboard_workspace_header_binds_admin_ws():
+    bob, admin = _setup()
+    from middleware import _BearerTokenMiddleware
+    seen = {}
+
+    async def app(scope, receive, send):
+        seen["ws"] = state.get_active_workspace()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    def run(path, token, extra=()):
+        sent = []
+
+        async def send(msg):
+            sent.append(msg)
+
+        async def receive():
+            return {"type": "http.request", "body": b""}
+
+        scope = {"type": "http", "path": path, "method": "GET",
+                 "headers": [(b"authorization", f"Bearer {token}".encode()), *extra]}
+        asyncio.run(_BearerTokenMiddleware(app)(scope, receive, send))
+        return sent[0]["status"]
+
+    assert run("/api/stats", admin, [(b"x-cortex-workspace", b"proj")]) == 200 and seen["ws"] == "proj"
+    assert run("/api/stats", admin, [(b"x-cortex-workspace", b"nope")]) == 200 and seen["ws"] == "default"
+    assert run("/api/stats", admin) == 200 and seen["ws"] == "default"
+    assert run("/api/stats", admin, [(b"x-cortex-workspace", b"default")]) == 200 and seen["ws"] == "default"
+    assert run("/api/users", bob, [(b"x-cortex-workspace", b"proj")]) == 403
+
+
+def test_repo_check_rejects_bad_format_without_network():
+    _setup()
+    from starlette.requests import Request
+    real = routes.httpx.AsyncClient
+
+    def boom(*a, **k):
+        raise AssertionError("network call attempted for an invalid repo")
+
+    routes.httpx.AsyncClient = boom
+    try:
+        for q in (b"repo=not%20a%20repo", b"repo=../user", b"repo=owner/..", b"repo=.hidden/x"):
+            req = Request({"type": "http", "method": "GET", "path": "/api/github/repo-check",
+                           "query_string": q, "headers": []})
+            resp = asyncio.run(routes._api_github_repo_check(req))
+            assert resp.status_code == 400 and b"Use owner/name format" in resp.body, (q, resp.body)
+    finally:
+        routes.httpx.AsyncClient = real
+
+
+def test_repo_check_branches():
+    _setup()
+    from starlette.requests import Request
+    seen = {}
+
+    class FakeResp:
+        def __init__(self, status, body=None):
+            self.status_code, self._body = status, body or {}
+
+        def json(self):
+            return self._body
+
+    class FakeClient:
+        status, body = 200, {}
+
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, headers=None, params=None):
+            seen["url"], seen["auth"] = url, headers.get("Authorization")
+            return FakeResp(FakeClient.status, FakeClient.body)
+
+    def check(qs):
+        req = Request({"type": "http", "method": "GET", "path": "/api/github/repo-check",
+                       "query_string": qs.encode(), "headers": []})
+        return asyncio.run(routes._api_github_repo_check(req))
+
+    orig_client, orig_tok = routes.httpx.AsyncClient, routes.get_github_token
+    routes.httpx.AsyncClient = FakeClient
+    try:
+        routes.get_github_token = lambda: ("", "none")
+        r = check("repo=alice/app")
+        assert r.status_code == 503 and b"No GitHub token configured" in r.body, r.body
+        routes.get_github_token = lambda: ("ghp_tok", "settings")
+        FakeClient.status, FakeClient.body = 200, {"full_name": "alice/app", "private": True, "archived": False}
+        r = check("repo=https%3A%2F%2Fgithub.com%2Falice%2Fapp.git%2F")
+        assert r.status_code == 200 and seen["url"] == "https://api.github.com/repos/alice/app", seen
+        assert seen["auth"] == "token ghp_tok"
+        import json as _json
+        assert _json.loads(r.body) == {"exists": True, "full_name": "alice/app", "private": True, "archived": False}
+        FakeClient.status = 404
+        r = check("repo=alice/gone")
+        assert r.status_code == 200 and _json.loads(r.body) == {"exists": False}, r.body
+        FakeClient.status = 500
+        r = check("repo=alice/app")
+        assert r.status_code == 502 and b"500" in r.body, r.body
+    finally:
+        routes.httpx.AsyncClient, routes.get_github_token = orig_client, orig_tok
+
+
+def test_webhook_targets_exact_owner_name():
+    _setup()
+    from repos import _save_repos
+    _save_repos(["alice/app"], "default")
+    _save_repos(["bob/app"], "proj")
+    code_ws, _ = routes._webhook_targets("alice/app")
+    assert code_ws == ["default"], code_ws  # bob/app must not match a push from alice/app
+    code_ws, _ = routes._webhook_targets("ALICE/app")
+    assert code_ws == ["default"], code_ws  # case-insensitive
+    code_ws, _ = routes._webhook_targets("bob/app")
+    assert code_ws == ["proj"], code_ws
+
+
+def test_clone_dest_keyed_by_owner():
+    from pathlib import Path
+    sys.path.insert(0, os.path.join(_root, "server", "indexer"))
+    import index_code
+    assert index_code._clone_dest("alice/app") == index_code.REPOS_DIR / "alice" / "app"
+    assert index_code._clone_dest("alice/app") != index_code._clone_dest("bob/app")
+    assert isinstance(index_code._clone_dest("alice/app"), Path)
+
+
+def test_api_stats_and_search_use_workspace_collections():
+    _setup()
+    import web_ui
+    names = []
+
+    class FakeQdrant:
+        def __init__(self, url=None):
+            pass
+
+        def collection_exists(self, name):
+            names.append(("exists", name))
+            return False  # shared workspace not indexed yet
+
+        def get_collection(self, name):
+            raise AssertionError("must not fetch a missing collection")
+
+        def query_points(self, name, **kw):
+            names.append(("query", name))
+            return SimpleNamespace(points=[])
+
+    class FakeReq:
+        async def json(self):
+            return {"query": "hello", "collections": ["notes", "code"]}
+
+    orig_qc, orig_get = web_ui.QdrantClient, web_ui.httpx.get
+    web_ui.QdrantClient = FakeQdrant
+    def no_ollama(*a, **k):
+        raise OSError("no ollama in tests")
+
+    web_ui.httpx.get = no_ollama
+    tok = state.bind_workspace("proj")
+    try:
+        stats = asyncio.run(web_ui.api_stats(None, "http://qdrant", "http://ollama"))
+        assert stats.body and b'"notes":{"points_count":0}' in stats.body and b'"code":{"points_count":0}' in stats.body, stats.body
+        res = asyncio.run(web_ui.api_search(FakeReq(), "http://qdrant", lambda q: [0.0]))
+        assert res.body == b'{"notes":[],"code":[]}', res.body
+    finally:
+        state.unbind_workspace(tok)
+        web_ui.QdrantClient, web_ui.httpx.get = orig_qc, orig_get
+    assert ("exists", "proj_notes") in names and ("exists", "proj_code") in names, names
+    assert ("query", "proj_notes") in names and ("query", "proj_code") in names, names
+
+
+def test_template_pkce_and_switcher():
+    import template  # noqa: E402
+    html = template.UI_HTML
+    # per-login PKCE verifier keyed by state, so concurrent tabs do not clobber each other
+    assert "cortex_pkce_" in html
+    assert "state: state" in html
+    assert "setItem('cortex_pkce_verifier'" not in html
+    # header workspace switcher and scoped API calls
+    assert 'id="ws-switch"' in html
+    assert "X-Cortex-Workspace" in html
+    assert "/api/github/repo-check" in html
+    # invite picks its workspace from the switcher, no per-invite checkboxes
+    assert 'id="invite-ws"' not in html
+
+
 if __name__ == "__main__":
     import traceback
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
