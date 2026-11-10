@@ -22,11 +22,13 @@ from .config import (
     get_roots, read_index_meta,
 )
 from .embedder import embed, sparse_embed
-from .state import _stats, get_graph_meta, save_stats, invalidate_graph_cache
+from .state import _stats, get_graph_meta, save_stats, maybe_save_stats, invalidate_graph_cache
 from .indexer import index_path
 from .core.formatters import (
     format_notes_parts, format_code_results, fmt_stats, fmt_age, fmt_index_roots,
+    strip_embed_header, fmt_status, classify_empty,
 )
+from .core import savings
 
 mcp = MCPServer("cortex", version=VERSION)
 log = logging.getLogger("cortex")
@@ -55,6 +57,40 @@ _reindex_state: dict = {
 }
 _watcher = None
 _watched: tuple = ()
+LOCAL_STORE = savings.SessionStore(None)
+
+
+def _session_key() -> tuple:
+    return ("local", get_active_workspace() or "local")
+
+
+def _empty_status(kind: str, client, exc=None) -> str:
+    """Typed recovery text for an empty/failed query. Re-raises exc when the collection is populated."""
+    try:
+        exists = client.collection_exists(kind)
+        points = (client.get_collection(kind).points_count or 0) if exists else 0
+    except Exception:
+        if exc is not None:
+            raise exc
+        exists, points = False, 0
+    reindexing = bool(_reindex_state["running"] or db.index_lock.locked())
+    code = classify_empty(exists, points, reindexing)
+    if exc is not None and code == "no_match":
+        raise exc
+    if code == "reindex_in_progress":
+        nxt = "reindex_status()"
+    elif code == "no_match":
+        nxt = f"search_{kind}(<rephrased query>)"
+    else:
+        nxt = "reindex()"
+    return fmt_status(code, None, nxt)
+
+
+def _with_header(out: str) -> str:
+    """Index header after the body; a typed status stays the first line."""
+    if out.startswith("status:"):
+        return f"{out}\n\n{_index_header()}"
+    return f"{_index_header()}\n\n{out}"
 
 
 def _qdrant():
@@ -165,11 +201,19 @@ def _search_notes(query: str, limit: int = 5):
             with_payload=True,
         ).points
     except Exception:
-        results = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
+        try:
+            results = client.query_points("notes", query=vector, limit=limit, with_payload=True).points
+        except Exception as e:
+            return _empty_status("notes", client, e), [], []
     if not results:
-        return "No results found.", [], []
+        return _empty_status("notes", client), [], []
     _stats["total_results_notes"] += len(results)
     parts, matched_files, matched_scores = format_notes_parts(results)
+    savings.record_notes(
+        _stats, LOCAL_STORE, _session_key(),
+        [(r.payload.get("file", ""), strip_embed_header(r.payload["text"]) or r.payload["text"]) for r in results],
+        savings.notes_bytes_map(data_dir() / "graph_notes.json"),
+    )
     ppr = _ppr_block(matched_files, matched_scores)
     if ppr:
         parts.append(ppr)
@@ -195,9 +239,12 @@ def _search_code(query: str, limit: int = 5):
             with_payload=True,
         ).points
     except Exception:
-        results = client.query_points("code", query=vector, limit=fetch_limit, with_payload=True).points
+        try:
+            results = client.query_points("code", query=vector, limit=fetch_limit, with_payload=True).points
+        except Exception as e:
+            return _empty_status("code", client, e), []
     if not results:
-        return "No results found.", []
+        return _empty_status("code", client), []
     scored = []
     for r in results:
         p = r.payload
@@ -219,6 +266,13 @@ def _search_code(query: str, limit: int = 5):
         if len(deduped) >= limit:
             break
     _stats["total_results_code"] += len(deduped)
+    savings.record_code(
+        _stats, LOCAL_STORE, _session_key(),
+        [(it[1].payload.get("repo", ""), it[1].payload.get("file", ""),
+          strip_embed_header(it[1].payload["text"]) or it[1].payload["text"], it[2]) for it in deduped],
+        [(it[1].payload.get("repo", ""), it[1].payload.get("file", ""), it[2]) for it in scored
+         if f"{it[1].payload.get('repo', '')}/{it[1].payload.get('file', '')}" not in seen],
+    )
     log_entries = [
         {"repo": r.payload.get("repo", ""), "file": r.payload.get("file", ""), "score": round(bs, 3)}
         for bs, r, _ in deduped
@@ -247,7 +301,8 @@ def search_notes(query: str, limit: int = 5) -> str:
         {"file": f, "score": round(s, 3)} for f, s in zip(matched_files, matched_scores)
     ])
     log.info("search_notes %r -> %d hits", query, len(matched_files))
-    return f"{_index_header()}\n\n{out}"
+    maybe_save_stats()
+    return _with_header(out)
 
 
 @mcp.tool()
@@ -261,7 +316,8 @@ def search_code(query: str, limit: int = 5) -> str:
     out, log_entries = _search_code(query, limit)
     _log_search("search_code", query, log_entries)
     log.info("search_code %r -> %d hits", query, len(log_entries))
-    return f"{_index_header()}\n\n{out}"
+    maybe_save_stats()
+    return _with_header(out)
 
 
 @mcp.tool()
@@ -278,6 +334,13 @@ def search_all(query: str, limit: int = 5) -> str:
     code_out, log_entries = _search_code(query, limit)
     _log_search("search_all", query, log_entries)
     log.info("search_all %r -> notes=%d code=%d", query, len(matched_files), len(log_entries))
+    maybe_save_stats()
+    n_status, c_status = notes_out.startswith("status:"), code_out.startswith("status:")
+    if n_status or c_status:
+        lead = "\n\n".join(dict.fromkeys(o for o, st in ((notes_out, n_status), (code_out, c_status)) if st))
+        notes_out = "(none)" if n_status else notes_out
+        code_out = "(none)" if c_status else code_out
+        return f"{lead}\n\n{_index_header()}\n\n## Notes\n\n{notes_out}\n\n## Code\n\n{code_out}"
     return f"{_index_header()}\n\n## Notes\n\n{notes_out}\n\n## Code\n\n{code_out}"
 
 
@@ -338,7 +401,7 @@ def get_stats(all: bool = False) -> str:
         for v in sorted(versions):
             blocks.append(fmt_stats(v, versions[v], current=(v == VERSION)))
         return "\n\n".join(blocks)
-    return _index_summary() + "\n\n" + fmt_stats(VERSION, _stats, current=True)
+    return _index_summary() + "\n\n" + fmt_stats(VERSION, savings.snapshot(_stats), current=True)
 
 
 def _index_summary(ws: str | None = None) -> str:
@@ -368,7 +431,7 @@ def get_neighbors(file: str, repo: str) -> str:
     """
     meta = get_graph_meta(repo)
     if not meta:
-        return f"No graph data for '{repo}'. Run reindex() first."
+        return fmt_status("repo_not_indexed", f"No graph data for '{repo}'.", "reindex()")
     file = file.removeprefix("res://")  # Godot paths: res:// is relative to the project root
     file_meta = meta.get(file)
     if file_meta is None:
@@ -405,7 +468,7 @@ def get_community(repo: str, community_id: int) -> str:
     """
     meta = get_graph_meta(repo)
     if not meta:
-        return f"No graph data for '{repo}'. Run reindex() first."
+        return fmt_status("repo_not_indexed", f"No graph data for '{repo}'.", "reindex()")
     members = [
         (f, m.get("centrality", 0))
         for f, m in meta.items()

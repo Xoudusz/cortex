@@ -101,6 +101,59 @@ def format_code_results(deduped) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def _num(stats: dict, key: str):
+    v = stats.get(key, 0)
+    return v if isinstance(v, (int, float)) else 0
+
+
+def _savings_line(stats: dict, k) -> str:
+    oc, on, mo = _num(stats, "tokens_observed_code"), _num(stats, "tokens_observed_notes"), _num(stats, "tokens_modeled_code")
+    return (
+        f"  tokens avoided: observed={k(oc + on)} (code={k(oc)} notes={k(on)}) modeled={k(mo)} total={k(oc + on + mo)}"
+        f" · hits measured={_num(stats, 'savings_hits_measured')} unmeasured={_num(stats, 'savings_hits_unmeasured')} (~bytes/4 est.)"
+    )
+
+
+def _by_user_line(stats: dict, k) -> str:
+    by = stats.get("savings_by_user")
+    if not isinstance(by, dict) or not by:
+        return ""
+    rows = [(u, (b.get("observed", 0) or 0) + (b.get("modeled", 0) or 0))
+            for u, b in by.items() if isinstance(b, dict)]
+    if not rows:
+        return ""
+    rows.sort(key=lambda r: -r[1])
+    out = "  by user: " + " ".join(f"{u}={k(t)}" for u, t in rows[:5])
+    if len(rows) > 5:
+        out += f" +{len(rows) - 5} more"
+    return out
+
+
+_STATUS_HINTS = {
+    "index_missing": "No index exists for this workspace yet.",
+    "index_empty": "The index exists but holds no chunks.",
+    "reindex_in_progress": "A reindex is running; results will appear when it finishes.",
+    "no_match": "Index is populated but nothing matched this query. Rephrase or broaden the query.",
+    "repo_not_indexed": "No graph data for this repo.",
+}
+
+
+def fmt_status(code: str, hint: str | None = None, next_call: str = "") -> str:
+    """Typed recovery state; callers put it on the first line of tool output."""
+    hint = hint if hint is not None else _STATUS_HINTS.get(code, "")
+    return f"status: {code}\n{hint}\nnext: {next_call}"
+
+
+def classify_empty(exists: bool, points: int, reindexing: bool) -> str:
+    if (not exists or not points) and reindexing:
+        return "reindex_in_progress"
+    if not exists:
+        return "index_missing"
+    if not points:
+        return "index_empty"
+    return "no_match"
+
+
 def fmt_stats(v: str, stats: dict, current: bool = False) -> str:
     """Format stats block for one version. Safe for both server and local stats dicts."""
     total_searches = stats.get("search_code_calls", 0) + stats.get("search_notes_calls", 0) + stats.get("search_all_calls", 0)
@@ -158,6 +211,12 @@ def fmt_stats(v: str, stats: dict, current: bool = False) -> str:
 
     lines += [
         f"  context injected: notes={_k(ctx_notes)} code={_k(ctx_code)}  total={_k(ctx_total)} tokens (~chars/4 est.)",
+        _savings_line(stats, _k),
+    ]
+    by_user = _by_user_line(stats, _k)
+    if by_user:
+        lines.append(by_user)
+    lines += [
         f"  graph cache: {cache_rate} ({stats.get('graph_cache_hits', 0)}/{total_cache})  cold={cold_loads}",
         f"  embed cache skipped: notes={stats.get('embed_cache_notes', 0)} code={stats.get('embed_cache_code', 0)}",
         f"  reindexes: {stats.get('reindex_count', 0)}",

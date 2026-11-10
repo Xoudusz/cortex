@@ -48,6 +48,10 @@ echo "=== tests/test_godot.py ==="
 $PYTHON tests/test_godot.py
 
 echo ""
+echo "=== tests/test_savings.py ==="
+$PYTHON tests/test_savings.py
+
+echo ""
 echo "=== tests/test_incremental.py (real embeddings) ==="
 $PYTHON tests/test_incremental.py
 

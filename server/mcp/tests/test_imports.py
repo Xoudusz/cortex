@@ -65,6 +65,11 @@ def test_tools_import():
     assert mcp is not None
 
 
+def test_savings_import():
+    import savings
+    assert savings.SERVER_STORE.ttl == savings.SESSION_TTL
+
+
 def test_config_allowed_hosts_empty():
     import importlib, os
     os.environ.pop("ALLOWED_HOSTS", None)

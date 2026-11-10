@@ -331,6 +331,11 @@ def build_code_graph(repo_path: Path, all_files: set):
         return None
     G = nx.DiGraph()
     G.add_nodes_from(all_files)
+    for rel in all_files:
+        try:
+            G.nodes[rel]["bytes"] = (repo_path / rel).stat().st_size
+        except OSError:
+            pass
     symbol_to_file = _build_symbol_map(repo_path, all_files)
     for rel in all_files:
         path = repo_path / rel
@@ -374,15 +379,19 @@ def compute_code_metadata(G) -> dict:
         for i, comp in enumerate(nx.connected_components(undirected)):
             for node in comp:
                 communities[node] = i
-    return {
-        node: {
+    meta: dict = {}
+    for node in G.nodes:
+        entry = {
             "centrality": centrality.get(node, 0.0),
             "community_id": communities.get(node, 0),
             "imports": [v for _, v in G.out_edges(node)],
             "imported_by": [u for u, _ in G.in_edges(node)],
         }
-        for node in G.nodes
-    }
+        nbytes = G.nodes[node].get("bytes")
+        if nbytes is not None:
+            entry["bytes"] = nbytes
+        meta[node] = entry
+    return meta
 
 
 def persist_code_graph(G, metadata: dict, repo_name: str, data_dir: Path) -> None:

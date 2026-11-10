@@ -28,11 +28,14 @@ def build_notes_graph(notes_dir: Path):
     ]
     stem_to_rel: dict = {}
     for path in md_files:
-        rel = str(path.relative_to(notes_dir))
-        G.add_node(rel)
+        rel = path.relative_to(notes_dir).as_posix()
+        try:
+            G.add_node(rel, bytes=path.stat().st_size)
+        except OSError:
+            G.add_node(rel)
         stem_to_rel[path.stem.lower()] = rel
     for path in md_files:
-        rel = str(path.relative_to(notes_dir))
+        rel = path.relative_to(notes_dir).as_posix()
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except Exception:
@@ -49,8 +52,15 @@ def persist_notes_graph(G, data_dir: Path) -> None:
     if not _NX_AVAILABLE or G is None:
         return
     data_dir.mkdir(parents=True, exist_ok=True)
+    def _node(n):
+        d = {"id": n, "centrality": 0, "community_id": 0}
+        b = G.nodes[n].get("bytes")
+        if b is not None:
+            d["bytes"] = b
+        return d
+
     data = {
-        "nodes": [{"id": n, "centrality": 0, "community_id": 0} for n in G.nodes],
+        "nodes": [_node(n) for n in G.nodes],
         "edges": [{"source": u, "target": v} for u, v in G.edges],
     }
     out = data_dir / "graph_notes.json"

@@ -74,12 +74,24 @@ def pull_models() -> None:
 
 
 @cli.command()
-def stats() -> None:
+@click.option("--tui", is_flag=True, help="Show the tokens-avoided dashboard.")
+@click.option("--watch", "watch_", is_flag=True,
+              help="Live dashboard (implies --tui); refreshes every 2s. Stats persist at most every ~5s, so it may lag.")
+def stats(tui: bool, watch_: bool) -> None:
     """Show cortex efficiency stats."""
+    if tui or watch_:
+        from . import tui as _tui
+        from .config import VERSION
+        if watch_:
+            _tui.watch(VERSION)
+        else:
+            _tui.render(VERSION)
+        return
     from .state import _stats
     from .core.formatters import fmt_stats
+    from .core.savings import snapshot
     from .config import VERSION
-    click.echo(fmt_stats(VERSION, _stats, current=True))
+    click.echo(fmt_stats(VERSION, snapshot(_stats), current=True))
 
 
 @cli.group()

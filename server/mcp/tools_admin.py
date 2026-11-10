@@ -12,7 +12,8 @@ from state import (_stats, _get_code_graph_meta, _load_all_stats, current_user, 
 from onboarding import PROJECT_CLAUDE_MD_TEMPLATE, _merge_onboarding, _build_cortex_section
 from reindex import _enqueue, get_status, clear_cache as _clear_cache
 from repos import _load_repos
-from formatters import fmt_stats
+from formatters import fmt_stats, fmt_status
+from savings import snapshot as _snapshot
 
 
 def register_admin(mcp) -> None:
@@ -115,7 +116,7 @@ def register_admin(mcp) -> None:
             return "=== All versions ===\n\n" + "\n\n".join(blocks)
 
         queue_depth = get_status().get("queue_depth", 0)
-        out = fmt_stats(VERSION, _stats, current=True)
+        out = fmt_stats(VERSION, _snapshot(_stats), current=True)
         if queue_depth:
             out += f"\n  reindex queue depth: {queue_depth}"
         return out
@@ -131,7 +132,7 @@ def register_admin(mcp) -> None:
         """
         meta = _get_code_graph_meta(repo)
         if not meta:
-            return f"No graph data for '{repo}'. Run reindex(code=True, repo='{repo}') first."
+            return fmt_status("repo_not_indexed", f"No graph data for '{repo}'.", f"reindex(code=True, repo='{repo}')")
         file = file.removeprefix("res://")  # Godot paths: res:// is relative to the project root
         file_meta = meta.get(file)
         if file_meta is None:
@@ -168,7 +169,7 @@ def register_admin(mcp) -> None:
         """
         meta = _get_code_graph_meta(repo)
         if not meta:
-            return f"No graph data for '{repo}'. Run reindex(code=True, repo='{repo}') first."
+            return fmt_status("repo_not_indexed", f"No graph data for '{repo}'.", f"reindex(code=True, repo='{repo}')")
         members = [
             (f, m.get("centrality", 0))
             for f, m in meta.items()

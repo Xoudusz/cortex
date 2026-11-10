@@ -26,7 +26,7 @@ COPY server/mcp/server.py server/mcp/web_ui.py server/mcp/oauth.py server/mcp/co
      server/mcp/tools_search.py server/mcp/tools_admin.py server/mcp/tools_users.py server/mcp/users.py \
      server/mcp/template.py server/mcp/state.py server/mcp/repos.py server/mcp/onboarding.py \
      server/mcp/middleware.py server/mcp/watcher.py server/mcp/routes.py ./
-COPY core/chunker.py core/godot.py core/cache.py core/graph.py core/code_graph.py core/notes_graph.py core/global_graph.py core/formatters.py core/roslyn_analyzer.py ./
+COPY core/chunker.py core/godot.py core/cache.py core/graph.py core/code_graph.py core/notes_graph.py core/global_graph.py core/formatters.py core/savings.py core/roslyn_analyzer.py ./
 COPY server/indexer/index.py server/indexer/index_code.py ./
 COPY --from=roslyn-builder /out/CortexAnalyzer /app/roslyn_tool/CortexAnalyzer
 RUN chmod +x /app/roslyn_tool/CortexAnalyzer /app/index.py /app/index_code.py
