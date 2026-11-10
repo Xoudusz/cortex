@@ -5,6 +5,8 @@ import argparse
 import hashlib
 import json
 import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -118,10 +120,37 @@ def _delete_file_points(client, repo_name: str, rel: str) -> None:
         print(f"  warn: delete {rel}: {e}", flush=True)
 
 
+_REPO_SEG_RE = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_.-]*")
+_GH_URL_RE = re.compile(r"^(?:[a-z+]+://)?(?:[^@/]+@)?github\.com[:/]([^/\s:@]+)/([^/\s]+?)(?:\.git)?/?$")
+
+
+class CloneCheckError(RuntimeError):
+    """Existing clone could not be verified (git failed); the path is kept, never deleted."""
+
+
 def _clone_dest(repo: str) -> Path:
-    """Clone location keyed by owner/name so same-named repos from different owners don't collide."""
-    owner, name = repo.split("/")[0], repo.split("/")[1]
-    return REPOS_DIR / owner / name
+    """Clone location under @owners/<owner>/<name>. '@' is not valid in GitHub names, so this never overlaps a legacy REPOS_DIR/<name> clone."""
+    parts = repo.split("/")
+    if len(parts) != 2 or not all(_REPO_SEG_RE.fullmatch(p) for p in parts):
+        raise ValueError(f"invalid repo name: {repo!r}")
+    owner, name = parts
+    return REPOS_DIR / "@owners" / owner / name
+
+
+def _is_own_clone(dest: Path) -> bool:
+    """True only if dest is a real git clone whose own top level is dest (not a parent repo or symlink)."""
+    if dest.is_symlink() or not dest.is_dir():
+        return False
+    git_dir = dest / ".git"
+    if git_dir.is_symlink() or not git_dir.is_dir():
+        return False
+    result = subprocess.run(
+        ["git", "-c", "safe.bareRepository=explicit", "-C", str(dest), "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise CloneCheckError(f"cannot verify existing clone {dest.name}: git rev-parse rc={result.returncode}: {git_error(result.stderr)}")
+    return Path(result.stdout.strip()).resolve() == dest.resolve()
 
 
 def clone_or_pull(repo: str) -> Path:
@@ -129,30 +158,128 @@ def clone_or_pull(repo: str) -> Path:
     dest = _clone_dest(repo)
     dest.parent.mkdir(parents=True, exist_ok=True)
     auth_url = f"https://Xoudusz:{TOKEN}@github.com/{repo}.git"
-    if dest.exists():
-        print(f"  pulling {repo}...", flush=True)
-        # The clone stored the token that was current then; refresh it so a rotated PAT works.
-        subprocess.run(["git", "-C", str(dest), "remote", "set-url", "origin", auth_url],
-                       capture_output=True, text=True)
-        result = subprocess.run(
-            ["git", "-C", str(dest), "pull"],
-            capture_output=True, text=True,
-        )
-        for line in result.stdout.strip().splitlines():
-            print(f"    {line}", flush=True)
-        if result.returncode != 0:
-            print(f"    git pull failed (rc={result.returncode}): {git_error(result.stderr)}", flush=True)
-    else:
-        print(f"  cloning {repo} (shallow)...", flush=True)
-        result = subprocess.run(
-            ["git", "clone", "--depth=1", auth_url, str(dest)],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            raise subprocess.CalledProcessError(result.returncode, "git clone", result.stderr)
-        for line in result.stdout.strip().splitlines():
-            print(f"    {line}", flush=True)
+    if dest.is_symlink() or dest.exists():
+        if _is_own_clone(dest):
+            print(f"  pulling {repo}...", flush=True)
+            # The clone stored the token that was current then; refresh it so a rotated PAT works.
+            subprocess.run(["git", "-c", "safe.bareRepository=explicit", "-C", str(dest), "remote", "set-url", "origin", auth_url],
+                           capture_output=True, text=True)
+            result = subprocess.run(
+                ["git", "-c", "safe.bareRepository=explicit", "-C", str(dest), "pull"],
+                capture_output=True, text=True,
+            )
+            for line in result.stdout.strip().splitlines():
+                print(f"    {line}", flush=True)
+            if result.returncode != 0:
+                print(f"    git pull failed (rc={result.returncode}): {git_error(result.stderr)}", flush=True)
+            return dest
+        print(f"  replacing {repo}: {dest} is not its own git clone", flush=True)
+        if dest.is_symlink() or not dest.is_dir():
+            dest.unlink()
+        else:
+            shutil.rmtree(dest)
+    print(f"  cloning {repo} (shallow)...", flush=True)
+    result = subprocess.run(
+        ["git", "-c", "safe.bareRepository=explicit", "clone", "--depth=1", auth_url, str(dest)],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(result.returncode, "git clone", result.stderr)
+    for line in result.stdout.strip().splitlines():
+        print(f"    {line}", flush=True)
     return dest
+
+
+def _origin_url(config_text: str) -> str:
+    """url under [remote "origin"] in a git config file ('' if none). Plain text parse, no git call."""
+    in_origin = False
+    for raw in config_text.splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            in_origin = line == '[remote "origin"]'
+            continue
+        key, sep, value = line.partition("=")
+        if in_origin and sep and key.strip().lower() == "url":
+            return value.strip()
+    return ""
+
+
+def _is_clone_dir(path: Path) -> bool:
+    """Real directory with a real .git directory (no symlinks, no git call)."""
+    git_dir = path / ".git"
+    return path.is_dir() and not path.is_symlink() and git_dir.is_dir() and not git_dir.is_symlink()
+
+
+def _migrate_clone(path: Path, label: str) -> None:
+    """Move a clone to @owners by its origin URL, or remove it. Reads .git/config only; never prints the URL."""
+    try:
+        config_text = (path / ".git" / "config").read_text(errors="replace")
+    except OSError:
+        config_text = ""
+    url = _origin_url(config_text)
+    match = _GH_URL_RE.match(url) if url else None
+    target, slug, reason = None, "", ""
+    if not match:
+        reason = "no github origin"
+    else:
+        slug = f"{match.group(1)}/{match.group(2)}"
+        try:
+            target = _clone_dest(slug)
+        except ValueError:
+            reason = "invalid owner/name"
+    if target is not None and (target.is_symlink() or target.exists()):
+        reason = "target exists"
+    if reason:
+        shutil.rmtree(path)
+        print(f"  removed legacy clone {label} ({reason})", flush=True)
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    os.rename(path, target)
+    print(f"  migrated {label} -> {slug}", flush=True)
+
+
+def _migrate_entry(child: Path) -> None:
+    if child.name == "@owners" or not _REPO_SEG_RE.fullmatch(child.name):
+        return  # not ours to touch
+    if child.is_symlink():
+        child.unlink()
+        print(f"  removed legacy symlink {child.name}", flush=True)
+        return
+    if not child.is_dir():
+        child.unlink()
+        print(f"  removed legacy file {child.name}", flush=True)
+        return
+    if _is_clone_dir(child):
+        _migrate_clone(child, child.name)
+        return
+    # v3.2.0 owner layout: REPOS_DIR/<owner>/<name>/.git
+    for sub in sorted(child.iterdir()):
+        if _REPO_SEG_RE.fullmatch(sub.name) and _is_clone_dir(sub):
+            try:
+                _migrate_clone(sub, f"{child.name}/{sub.name}")
+            except OSError as e:
+                print(f"  warn: legacy clone {child.name}/{sub.name} left in place: {e.strerror or type(e).__name__}", flush=True)
+    if any(_is_clone_dir(s) for s in child.iterdir()):
+        print(f"  kept legacy dir {child.name}: a clone inside could not be migrated", flush=True)
+        return
+    shutil.rmtree(child)
+    print(f"  removed legacy dir {child.name} (no git clone inside)", flush=True)
+
+
+def _migrate_legacy_clones() -> None:
+    """Move or delete pre-@owners clones (REPOS_DIR/<name> and REPOS_DIR/<owner>/<name>). Never runs git; never follows symlinks."""
+    if not REPOS_DIR.is_dir():
+        return
+    try:
+        entries = sorted(REPOS_DIR.iterdir())
+    except OSError as e:
+        print(f"  warn: cannot list {REPOS_DIR}: {e.strerror or type(e).__name__}", flush=True)
+        return
+    for child in entries:
+        try:
+            _migrate_entry(child)
+        except OSError as e:
+            print(f"  warn: legacy entry {child.name} left in place: {e.strerror or type(e).__name__}", flush=True)
 
 
 def main():
@@ -172,6 +299,7 @@ def main():
         repos = all_repos
 
     REPOS_DIR.mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_clones()
     client = QdrantClient(url=QDRANT_URL)
 
     existing = [c.name for c in client.get_collections().collections]
@@ -199,6 +327,13 @@ def main():
             repo_path = clone_or_pull(repo)
         except subprocess.CalledProcessError as e:
             print(f"  SKIP {repo}: git clone failed (rc={e.returncode}): {git_error(e.output or e.stderr)}", flush=True)
+            continue
+        except CloneCheckError as e:
+            # never auto-deleted: a damaged clone stays until someone removes it by hand
+            print(f"  SKIP {repo}: {e} (if the clone is damaged, delete {_clone_dest(repo)} to re-clone)", flush=True)
+            continue
+        except (ValueError, OSError) as e:
+            print(f"  SKIP {repo}: {e.strerror or e}" if isinstance(e, OSError) else f"  SKIP {repo}: {e}", flush=True)
             continue
 
         incremental = args.files is not None or args.remove_files is not None
