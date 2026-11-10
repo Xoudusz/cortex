@@ -114,8 +114,9 @@ def _savings_line(stats: dict, k) -> str:
     )
 
 
-def _by_user_line(stats: dict, k) -> str:
-    by = stats.get("savings_by_user")
+def _by_line(stats: dict, field: str, label: str, k) -> str:
+    """'  <label>: name=total ...' top 5 by observed+modeled, '+N more' for the rest."""
+    by = stats.get(field)
     if not isinstance(by, dict) or not by:
         return ""
     rows = [(u, (b.get("observed", 0) or 0) + (b.get("modeled", 0) or 0))
@@ -123,7 +124,7 @@ def _by_user_line(stats: dict, k) -> str:
     if not rows:
         return ""
     rows.sort(key=lambda r: -r[1])
-    out = "  by user: " + " ".join(f"{u}={k(t)}" for u, t in rows[:5])
+    out = f"  {label}: " + " ".join(f"{u}={k(t)}" for u, t in rows[:5])
     if len(rows) > 5:
         out += f" +{len(rows) - 5} more"
     return out
@@ -213,7 +214,10 @@ def fmt_stats(v: str, stats: dict, current: bool = False) -> str:
         f"  context injected: notes={_k(ctx_notes)} code={_k(ctx_code)}  total={_k(ctx_total)} tokens (~chars/4 est.)",
         _savings_line(stats, _k),
     ]
-    by_user = _by_user_line(stats, _k)
+    by_repo = _by_line(stats, "savings_by_repo", "by repo", _k)
+    if by_repo:
+        lines.append(by_repo)
+    by_user = _by_line(stats, "savings_by_user", "by user", _k)
     if by_user:
         lines.append(by_user)
     lines += [

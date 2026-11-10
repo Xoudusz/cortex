@@ -52,6 +52,10 @@ echo "=== tests/test_savings.py ==="
 $PYTHON tests/test_savings.py
 
 echo ""
+echo "=== tests/test_index_code_cache.py ==="
+$PYTHON tests/test_index_code_cache.py
+
+echo ""
 echo "=== tests/test_incremental.py (real embeddings) ==="
 $PYTHON tests/test_incremental.py
 

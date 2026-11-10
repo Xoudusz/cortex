@@ -198,6 +198,17 @@ def main():
         excludes = EXCLUDE_PATTERNS + repo_ignore_patterns(repo_path)
         if len(excludes) > len(EXCLUDE_PATTERNS):
             print(f"  {name}: {len(excludes) - len(EXCLUDE_PATTERNS)} exclude pattern(s) from .cortexignore/.gdignore", flush=True)
+        if not incremental:
+            file_cache = load_cache("code")
+            if client.get_collection(COLLECTION).points_count == 0:
+                file_cache = {}
+            new_file_cache = dict(file_cache)
+            cached_files = 0
+        else:
+            file_cache = {}
+            new_file_cache = load_cache("code")
+            cached_files = 0
+
         if incremental:
             all_to_delete = list(set((args.files or []) + (args.remove_files or [])))
             if all_to_delete:
@@ -213,6 +224,8 @@ def main():
                         )
                     except Exception as e:
                         print(f"  warn: delete {rel}: {e}", flush=True)
+                for rel in args.remove_files or []:
+                    new_file_cache.pop(f"{name}/{rel}", None)
             code_files = [
                 repo_path / f for f in (args.files or [])
                 if is_safe_file(repo_path / f, repo_path) and Path(f).suffix in CODE_EXTS
@@ -228,17 +241,6 @@ def main():
                 and not _is_excluded(p.relative_to(repo_path).as_posix(), excludes)
             ]
 
-        if not incremental:
-            file_cache = load_cache("code")
-            if client.get_collection(COLLECTION).points_count == 0:
-                file_cache = {}
-            new_file_cache = dict(file_cache)
-            cached_files = 0
-        else:
-            file_cache = {}
-            new_file_cache = None
-            cached_files = 0
-
         total = 0
         file_point_ids: dict = {}
 
@@ -253,9 +255,9 @@ def main():
 
             rel_path = str(path.relative_to(repo_path)).replace("\\", "/")
 
+            cache_key = f"{name}/{rel_path}"
+            mtime = path.stat().st_mtime
             if not incremental:
-                cache_key = f"{name}/{rel_path}"
-                mtime = path.stat().st_mtime
                 entry = file_cache.get(cache_key, {})
                 if entry.get("mtime") == mtime:
                     cached_files += 1
@@ -267,6 +269,8 @@ def main():
                     continue
                 # changed file: drop its old chunks (ids depend on start_line, so they'd linger)
                 _delete_file_points(client, name, rel_path)
+            else:
+                content_hash = hashlib.sha1(path.read_bytes()).hexdigest()[:16]
 
             points = []
             for chunk in chunk_file(path, name, base_dir=repo_path, roslyn_data=roslyn_data.get(rel_path)):
@@ -284,8 +288,7 @@ def main():
             if points:
                 client.upsert(COLLECTION, points)
                 total += len(points)
-                if not incremental:
-                    new_file_cache[cache_key] = {"mtime": mtime, "hash": content_hash}
+            new_file_cache[cache_key] = {"mtime": mtime, "hash": content_hash}
 
         if not incremental:
             # files gone from disk or newly excluded: remove their chunks + cache entries
@@ -297,7 +300,7 @@ def main():
                 new_file_cache.pop(k, None)
             if gone:
                 print(f"  {name}: removed {len(gone)} deleted/excluded file(s) from the index", flush=True)
-            save_cache("code", new_file_cache)
+        save_cache("code", new_file_cache)
         embedded_count = len(code_files) - cached_files
         print(f"  {name}: {total} chunks from {embedded_count} files ({cached_files} cached)", flush=True)
 

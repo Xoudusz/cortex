@@ -228,6 +228,42 @@ def test_tui_renderable():
     assert "reindex to measure" in text and "1.4k" in text
 
 
+def test_fmt_stats_by_repo_line():
+    st = {"search_notes_calls": 0, "graph_cache_hits": 0, "graph_cache_misses": 0,
+          "savings_by_repo": {"b": {"observed": 1000, "modeled": 0}, "a": {"observed": 12000, "modeled": 1000}},
+          "savings_by_user": {"u": {"observed": 5000, "modeled": 0}}}
+    out = formatters.fmt_stats("3.1.1", st)
+    assert "  by repo: a=13k b=1k" in out
+    assert out.index("by repo:") < out.index("by user:")
+    assert "by repo:" not in formatters.fmt_stats("3.1.1", {"search_notes_calls": 0, "graph_cache_hits": 0, "graph_cache_misses": 0})
+
+
+def test_cache_roundtrip_atomic():
+    import cache
+    with tempfile.TemporaryDirectory() as d:
+        f = os.path.join(d, "embed_cache.json")
+        from pathlib import Path
+        p = Path(f)
+        cache.save_cache("code", {"r/a.py": {"mtime": 1.5, "hash": "abc"}}, p)
+        cache.save_cache("notes", {"n.md": {"mtime": 2.0, "hash": "def"}}, p)
+        assert cache.load_cache("code", p) == {"r/a.py": {"mtime": 1.5, "hash": "abc"}}
+        assert cache.load_cache("notes", p) == {"n.md": {"mtime": 2.0, "hash": "def"}}
+        assert sorted(os.listdir(d)) == ["embed_cache.json"]
+
+
+def test_cache_corrupt_warns_and_returns_empty():
+    import cache
+    import unittest
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "embed_cache.json"
+        p.write_text('{"code": {"r/a.py": {"mtime": 1.5, "hash"')  # truncated
+        with unittest.TestCase().assertLogs("cortex.cache", level="WARNING") as cm:
+            assert cache.load_cache("code", p) == {}
+        assert str(p) in cm.output[0] and "re-embedded" in cm.output[0]
+        assert cache.load_cache("code", Path(d) / "missing.json") == {}
+
+
 if __name__ == "__main__":
     import traceback
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_")]
