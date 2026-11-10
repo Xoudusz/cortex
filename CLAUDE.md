@@ -75,7 +75,7 @@ server/
     Dockerfile          # multi-stage: dotnet/sdk:8.0-bookworm-slim builds CortexAnalyzer → python:3.12-slim
   indexer/              # code/notes indexers for server mode
     index.py            # notes indexer — heading-chunked, tags, modified_at
-    index_code.py       # code indexer — clone/pull to REPOS_DIR/<owner>/<name>, embed, upsert
+    index_code.py       # code indexer — clone/pull to REPOS_DIR/@owners/<owner>/<name> (legacy clones migrated once), embed, upsert
 local/                  # cortex PyPI package — pipx install, stdio MCP, no server needed
   pyproject.toml        # package metadata, entry point: cortex = cortex.cli:cli
   cortex/

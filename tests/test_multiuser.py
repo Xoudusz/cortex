@@ -432,9 +432,301 @@ def test_clone_dest_keyed_by_owner():
     from pathlib import Path
     sys.path.insert(0, os.path.join(_root, "server", "indexer"))
     import index_code
-    assert index_code._clone_dest("alice/app") == index_code.REPOS_DIR / "alice" / "app"
+    assert index_code._clone_dest("alice/app") == index_code.REPOS_DIR / "@owners" / "alice" / "app"
     assert index_code._clone_dest("alice/app") != index_code._clone_dest("bob/app")
     assert isinstance(index_code._clone_dest("alice/app"), Path)
+    for bad in ["../x", "a/..", "a/b/c", ".h/x", "a"]:
+        try:
+            index_code._clone_dest(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"expected ValueError for {bad!r}")
+
+
+def _git_init(path: str) -> None:
+    import subprocess
+    os.makedirs(path, exist_ok=True)
+    subprocess.run(["git", "init", "-q", path], check=True, capture_output=True)
+
+
+def test_clone_or_pull_reclones_foreign_dir():
+    import subprocess
+    from pathlib import Path
+    from types import SimpleNamespace
+    sys.path.insert(0, os.path.join(_root, "server", "indexer"))
+    import index_code
+    real_run = subprocess.run
+    tmp = tempfile.mkdtemp()
+    repos = Path(tmp) / "repos"
+    parent = repos / "@owners" / "alice"
+    _git_init(str(parent))  # parent git repo: `git -C app` would walk up into it
+    app = parent / "app"
+    app.mkdir()
+    (app / "marker.txt").write_text("plain folder")
+    calls = []
+
+    def fake_run(cmd, *a, **kw):
+        calls.append(list(cmd))
+        if "rev-parse" in cmd:
+            return real_run(cmd, *a, **kw)
+        if "clone" in cmd:
+            os.makedirs(os.path.join(cmd[-1], ".git"))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    saved = (index_code.REPOS_DIR, index_code.subprocess.run)
+    try:
+        index_code.REPOS_DIR = repos
+        index_code.subprocess.run = fake_run
+        index_code.clone_or_pull("alice/app")
+    finally:
+        index_code.REPOS_DIR, index_code.subprocess.run = saved
+    assert not (app / "marker.txt").exists(), "foreign folder should be removed"
+    assert any("clone" in c for c in calls), calls
+    assert not any("set-url" in c or "pull" in c for c in calls), calls
+
+
+def test_clone_or_pull_pulls_own_clone():
+    import subprocess
+    from pathlib import Path
+    from types import SimpleNamespace
+    sys.path.insert(0, os.path.join(_root, "server", "indexer"))
+    import index_code
+    real_run = subprocess.run
+    tmp = tempfile.mkdtemp()
+    repos = Path(tmp) / "repos"
+    dest = repos / "@owners" / "alice" / "app"
+    _git_init(str(dest))
+    calls = []
+
+    def fake_run(cmd, *a, **kw):
+        calls.append(list(cmd))
+        if "rev-parse" in cmd:
+            return real_run(cmd, *a, **kw)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    saved = (index_code.REPOS_DIR, index_code.subprocess.run)
+    try:
+        index_code.REPOS_DIR = repos
+        index_code.subprocess.run = fake_run
+        index_code.clone_or_pull("alice/app")
+    finally:
+        index_code.REPOS_DIR, index_code.subprocess.run = saved
+    assert dest.is_dir() and (dest / ".git").is_dir(), "own clone must be kept"
+    assert any("set-url" in c for c in calls), calls
+    assert any("pull" in c for c in calls), calls
+    assert not any("clone" in c for c in calls), calls
+
+
+def test_migrate_legacy_clones():
+    import contextlib
+    import io
+    from pathlib import Path
+    sys.path.insert(0, os.path.join(_root, "server", "indexer"))
+    import index_code
+    tmp = tempfile.mkdtemp()
+    repos = Path(tmp) / "repos"
+    # legacy clone with token-bearing origin url -> moves to @owners/alice/app
+    app_git = repos / "app" / ".git"
+    app_git.mkdir(parents=True)
+    (app_git / "config").write_text(
+        '[core]\n\tbare = false\n[remote "origin"]\n\turl = https://x:tok@github.com/alice/app.git\n'
+        '\tfetch = +refs/heads/*:refs/remotes/origin/*\n')
+    (repos / "app" / "main.py").write_text("print(1)")
+    # plain junk dir -> removed
+    (repos / "junk").mkdir()
+    (repos / "junk" / "f.txt").write_text("x")
+    # name outside the repo-name rule -> left alone
+    (repos / "weird name").mkdir()
+    # existing @owners content -> untouched
+    keep = repos / "@owners" / "bob" / "keep"
+    keep.mkdir(parents=True)
+    (keep / "f.txt").write_text("keep")
+    # legacy clone whose target already exists -> removed
+    dup_git = repos / "dup" / ".git"
+    dup_git.mkdir(parents=True)
+    (dup_git / "config").write_text('[remote "origin"]\n\turl = https://github.com/bob/keep.git\n')
+
+    saved = index_code.REPOS_DIR
+    buf = io.StringIO()
+    try:
+        index_code.REPOS_DIR = repos
+        with contextlib.redirect_stdout(buf):
+            index_code._migrate_legacy_clones()
+    finally:
+        index_code.REPOS_DIR = saved
+    out = buf.getvalue()
+    assert (repos / "@owners" / "alice" / "app" / "main.py").exists(), out
+    assert not (repos / "app").exists()
+    assert not (repos / "junk").exists()
+    assert (repos / "weird name").is_dir()
+    assert (keep / "f.txt").read_text() == "keep"
+    assert not (repos / "dup").exists()
+    assert "tok" not in out, out
+
+
+def test_migrate_owner_layout_clone():
+    import contextlib
+    import io
+    from pathlib import Path
+    sys.path.insert(0, os.path.join(_root, "server", "indexer"))
+    import index_code
+    tmp = tempfile.mkdtemp()
+    repos = Path(tmp) / "repos"
+    app_git = repos / "alice" / "app" / ".git"
+    app_git.mkdir(parents=True)
+    (app_git / "config").write_text('[remote "origin"]\n\turl = https://github.com/alice/app.git\n')
+    (repos / "alice" / "app" / "main.py").write_text("print(1)")
+    (repos / "alice" / "junkdir").mkdir()  # no clone inside -> whole owner dir removed
+    saved = index_code.REPOS_DIR
+    buf = io.StringIO()
+    try:
+        index_code.REPOS_DIR = repos
+        with contextlib.redirect_stdout(buf):
+            index_code._migrate_legacy_clones()
+    finally:
+        index_code.REPOS_DIR = saved
+    assert (repos / "@owners" / "alice" / "app" / "main.py").exists(), buf.getvalue()
+    assert not (repos / "alice").exists()
+
+
+def test_migrate_rejects_non_github_url():
+    import contextlib
+    import io
+    from pathlib import Path
+    sys.path.insert(0, os.path.join(_root, "server", "indexer"))
+    import index_code
+    tmp = tempfile.mkdtemp()
+    repos = Path(tmp) / "repos"
+    evil_git = repos / "evil" / ".git"
+    evil_git.mkdir(parents=True)
+    (evil_git / "config").write_text('[remote "origin"]\n\turl = https://evil.example/github.com/alice/app\n')
+    saved = index_code.REPOS_DIR
+    buf = io.StringIO()
+    try:
+        index_code.REPOS_DIR = repos
+        with contextlib.redirect_stdout(buf):
+            index_code._migrate_legacy_clones()
+    finally:
+        index_code.REPOS_DIR = saved
+    assert not (repos / "evil").exists()
+    assert not (repos / "@owners" / "alice" / "app").exists()
+
+
+def test_clone_or_pull_replaces_symlink_dest():
+    import subprocess
+    from pathlib import Path
+    from types import SimpleNamespace
+    sys.path.insert(0, os.path.join(_root, "server", "indexer"))
+    import index_code
+    tmp = tempfile.mkdtemp()
+    repos = Path(tmp) / "repos"
+    outside = Path(tmp) / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("not ours")
+    dest = repos / "@owners" / "alice" / "app"
+    dest.parent.mkdir(parents=True)
+    os.symlink(outside, dest, target_is_directory=True)
+    calls = []
+
+    def fake_run(cmd, *a, **kw):
+        calls.append(list(cmd))
+        if "clone" in cmd:
+            os.makedirs(os.path.join(cmd[-1], ".git"))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    saved = (index_code.REPOS_DIR, index_code.subprocess.run)
+    try:
+        index_code.REPOS_DIR = repos
+        index_code.subprocess.run = fake_run
+        index_code.clone_or_pull("alice/app")
+    finally:
+        index_code.REPOS_DIR, index_code.subprocess.run = saved
+    assert not dest.is_symlink() and dest.is_dir(), "symlink must be replaced by a real clone"
+    assert (outside / "keep.txt").read_text() == "not ours", "symlink target must not be touched"
+    assert any("clone" in c for c in calls), calls
+
+
+def test_clone_or_pull_rev_parse_error_keeps_dest():
+    import subprocess
+    from pathlib import Path
+    from types import SimpleNamespace
+    sys.path.insert(0, os.path.join(_root, "server", "indexer"))
+    import index_code
+    tmp = tempfile.mkdtemp()
+    repos = Path(tmp) / "repos"
+    dest = repos / "@owners" / "alice" / "app"
+    _git_init(str(dest))
+    (dest / "work.txt").write_text("precious")
+    calls = []
+
+    def fake_run(cmd, *a, **kw):
+        calls.append(list(cmd))
+        if "rev-parse" in cmd:
+            return SimpleNamespace(returncode=128, stdout="", stderr="fatal: dubious ownership")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    saved = (index_code.REPOS_DIR, index_code.subprocess.run)
+    raised = False
+    try:
+        index_code.REPOS_DIR = repos
+        index_code.subprocess.run = fake_run
+        try:
+            index_code.clone_or_pull("alice/app")
+        except index_code.CloneCheckError:
+            raised = True
+    finally:
+        index_code.REPOS_DIR, index_code.subprocess.run = saved
+    assert raised, "rev-parse failure must raise CloneCheckError"
+    assert (dest / "work.txt").read_text() == "precious", "dest must NOT be deleted"
+    assert not any("clone" in c for c in calls), calls
+
+
+def test_main_skips_bad_and_unrunnable_repos():
+    import contextlib
+    import io
+    from pathlib import Path
+    from types import SimpleNamespace
+    sys.path.insert(0, os.path.join(_root, "server", "indexer"))
+    import index_code
+
+    class _FakeQdrant:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_collections(self):
+            return SimpleNamespace(collections=[SimpleNamespace(name=index_code.COLLECTION)])
+
+    def no_git(cmd, *a, **kw):
+        raise FileNotFoundError(2, "git not found")
+
+    def no_sparse(text):
+        raise RuntimeError("no sparse model in test")
+
+    tmp = tempfile.mkdtemp()
+    repos = Path(tmp) / "repos"
+    patches = [
+        (index_code, "REPOS_DIR", repos),
+        (index_code, "QdrantClient", _FakeQdrant),
+        (index_code, "_load_repos", lambda: ["bad/..", "alice/app"]),
+        (index_code, "sparse_embed", no_sparse),
+        (index_code.roslyn_analyzer, "is_available", lambda: False),
+        (index_code.subprocess, "run", no_git),
+        (sys, "argv", ["index_code.py"]),
+    ]
+    originals = [(obj, attr, getattr(obj, attr)) for obj, attr, _ in patches]
+    buf = io.StringIO()
+    try:
+        for obj, attr, val in patches:
+            setattr(obj, attr, val)
+        with contextlib.redirect_stdout(buf):
+            index_code.main()
+    finally:
+        for obj, attr, orig in originals:
+            setattr(obj, attr, orig)
+    out = buf.getvalue()
+    assert "SKIP bad/..: invalid repo name" in out, out
+    assert "SKIP alice/app:" in out, out
+    assert "Done." in out, out
 
 
 def test_api_stats_and_search_use_workspace_collections():

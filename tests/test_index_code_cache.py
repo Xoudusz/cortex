@@ -51,7 +51,7 @@ def _run_main(argv, repos_dir, data_dir, repos_config):
     patches = [
         (index_code, "QdrantClient", FakeQdrant),
         (index_code, "_load_repos", lambda: [REPO]),
-        (index_code, "clone_or_pull", lambda repo: repos_dir / NAME),
+        (index_code, "clone_or_pull", lambda repo: repos_dir / "@owners" / "Xoudusz" / NAME),
         (index_code, "chunk_file", _fake_chunk_file),
         (index_code, "embed", lambda text: [0.0] * index_code.VECTOR_SIZE),
         (index_code, "sparse_embed", _fake_sparse),
@@ -80,7 +80,7 @@ def test_incremental_remove_and_reembed_update_cache():
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         repos_dir = root / "repos"
-        repo_dir = repos_dir / NAME
+        repo_dir = repos_dir / "@owners" / "Xoudusz" / NAME
         repo_dir.mkdir(parents=True)
         content = b"print(1)\n"
         (repo_dir / "a.py").write_bytes(content)
