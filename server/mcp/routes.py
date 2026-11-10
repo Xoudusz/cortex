@@ -13,6 +13,7 @@ from starlette.responses import JSONResponse, Response
 
 from config import DATA_DIR, get_github_token, read_settings, write_settings, OLLAMA_URL, QDRANT_URL, STATS_FILE, VERSION, WEBHOOK_SECRET, embed, sparse_embed
 from state import _reindex_log, _stats, _webhook_log
+from savings import snapshot as _snapshot
 from repos import _load_repos, _load_repos_meta, _save_repos, ensure_workspace_repos
 from reindex import _enqueue, get_status, get_queue_snapshot, clear_cache as _clear_cache
 from web_ui import LOGO_SVG, api_search, api_stats, api_status, ui
@@ -143,7 +144,7 @@ async def _api_clear_cache_handler(request: Request):
 
 async def _api_stats_handler(request: Request):
     """Return Qdrant collection counts, Ollama status, and MCP efficiency stats."""
-    stats_payload = dict(_stats)
+    stats_payload = _snapshot(_stats)
     stats_payload["version"] = VERSION
     try:
         if STATS_FILE.exists():

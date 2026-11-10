@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config import DATA_DIR, STATS_FILE, VERSION, WORKSPACE
+from savings import snapshot as _snapshot
 import users as _users
 
 log = logging.getLogger("cortex")
@@ -105,6 +106,13 @@ def _default_stats() -> dict:
         "ppr_no_matches": 0,
         "ppr_below_threshold": 0,
         "ppr_exception": 0,
+        "tokens_observed_code": 0,
+        "tokens_observed_notes": 0,
+        "tokens_modeled_code": 0,
+        "savings_hits_measured": 0,
+        "savings_hits_unmeasured": 0,
+        "savings_by_repo": {},
+        "savings_by_user": {},
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -117,7 +125,11 @@ def _load_stats() -> dict:
             data = json.loads(STATS_FILE.read_text())
             saved = data.get("versions", {}).get(VERSION, {})
             if saved:
-                return {**defaults, **saved}
+                merged = {**defaults, **saved}
+                for k in ("savings_by_repo", "savings_by_user"):
+                    if not isinstance(merged.get(k), dict):
+                        merged[k] = {}
+                return merged
     except Exception:
         pass
     return defaults
@@ -142,7 +154,7 @@ def _save_stats() -> None:
                 existing = json.loads(STATS_FILE.read_text()).get("versions", {})
             except Exception:
                 log.warning("stats file corrupt, resetting")
-        existing[VERSION] = {**_stats, "last_saved": datetime.now(timezone.utc).isoformat()}
+        existing[VERSION] = {**_snapshot(_stats), "last_saved": datetime.now(timezone.utc).isoformat()}
         STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATS_FILE.write_text(json.dumps({"versions": existing}, indent=2))
     except Exception as e:

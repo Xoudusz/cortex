@@ -11,7 +11,9 @@ from qdrant_client.models import Prefetch, Fusion, SparseVector
 from config import QDRANT_URL, DATA_DIR, embed, sparse_embed, collection_name, PPR_THRESHOLD
 from state import _stats, _get_code_graph_meta, current_user, get_active_workspace, _workspace_data_dir
 from repos import _load_repos
-from formatters import format_notes_parts, format_code_results
+from formatters import format_notes_parts, format_code_results, strip_embed_header, fmt_status, classify_empty
+from reindex import get_status as _reindex_status
+import savings
 
 log = logging.getLogger("cortex")
 
@@ -78,6 +80,28 @@ def _augment_with_ppr(matched_files: list, matched_scores: list, graph_path) -> 
     return None
 
 
+def _empty_status(kind: str, ws: str, client, exc=None) -> str:
+    """Typed recovery text for an empty/failed query. Re-raises exc when the collection is populated."""
+    coll = collection_name(kind, ws)
+    try:
+        exists = client.collection_exists(coll)
+        points = (client.get_collection(coll).points_count or 0) if exists else 0
+    except Exception:
+        if exc is not None:
+            raise exc
+        exists, points = False, 0
+    code = classify_empty(exists, points, bool(_reindex_status().get("running")))
+    if exc is not None and code == "no_match":
+        raise exc
+    if code == "reindex_in_progress":
+        nxt = "reindex_status()"
+    elif code == "no_match":
+        nxt = f"search_{kind}(<rephrased query>)"
+    else:
+        nxt = f"reindex({kind}=True)"
+    return fmt_status(code, None, nxt)
+
+
 def _search_notes(query: str, limit: int = 5):
     ws = get_active_workspace()
     coll = collection_name("notes", ws)
@@ -96,11 +120,20 @@ def _search_notes(query: str, limit: int = 5):
             with_payload=True,
         ).points
     except Exception:
-        results = client.query_points(coll, query=vector, limit=limit, with_payload=True).points
+        try:
+            results = client.query_points(coll, query=vector, limit=limit, with_payload=True).points
+        except Exception as e:
+            return _empty_status("notes", ws, client, e), [], []
     if not results:
-        return "No results found.", [], []
+        return _empty_status("notes", ws, client), [], []
     _stats["total_results_notes"] += len(results)
     parts, matched_files, matched_scores = format_notes_parts(results)
+    user = current_user() or "anon"
+    savings.record_notes(
+        _stats, savings.SERVER_STORE, (user, ws),
+        [(r.payload.get("file", ""), strip_embed_header(r.payload["text"]) or r.payload["text"]) for r in results],
+        savings.notes_bytes_map(_workspace_data_dir(ws) / "graph_notes.json"), user=user,
+    )
     ppr_block = _augment_with_ppr(matched_files, matched_scores, _workspace_data_dir(ws) / "graph_notes.json")
     if ppr_block:
         parts.append(ppr_block)
@@ -110,7 +143,8 @@ def _search_notes(query: str, limit: int = 5):
 
 
 def _search_code(query: str, limit: int = 5):
-    coll = collection_name("code", get_active_workspace())
+    ws = get_active_workspace()
+    coll = collection_name("code", ws)
     client = QdrantClient(url=QDRANT_URL)
     vector = embed(query)
     fetch_limit = min(limit * 3, 50)
@@ -127,9 +161,12 @@ def _search_code(query: str, limit: int = 5):
             with_payload=True,
         ).points
     except Exception:
-        results = client.query_points(coll, query=vector, limit=fetch_limit, with_payload=True).points
+        try:
+            results = client.query_points(coll, query=vector, limit=fetch_limit, with_payload=True).points
+        except Exception as e:
+            return _empty_status("code", ws, client, e), []
     if not results:
-        return "No results found.", []
+        return _empty_status("code", ws, client), []
     scored = []
     for r in results:
         p = r.payload
@@ -151,6 +188,15 @@ def _search_code(query: str, limit: int = 5):
         if len(deduped) >= limit:
             break
     _stats["total_results_code"] += len(deduped)
+    user = current_user() or "anon"
+    savings.record_code(
+        _stats, savings.SERVER_STORE, (user, ws),
+        [(it[1].payload.get("repo", ""), it[1].payload.get("file", ""),
+          strip_embed_header(it[1].payload["text"]) or it[1].payload["text"], it[2]) for it in deduped],
+        [(it[1].payload.get("repo", ""), it[1].payload.get("file", ""), it[2]) for it in scored
+         if f"{it[1].payload.get('repo', '')}/{it[1].payload.get('file', '')}" not in seen_files],
+        user=user,
+    )
     log_entries = [
         {"repo": r.payload.get("repo", ""), "file": r.payload.get("file", ""), "score": round(bs, 3)}
         for bs, r, _ in deduped
@@ -200,4 +246,11 @@ def register_search(mcp) -> None:
         notes_out, matched_files, matched_scores = _search_notes(query, limit)
         code_out, log_entries = _search_code(query, limit)
         _log_search("search_all", query, log_entries)
+        n_status, c_status = notes_out.startswith("status:"), code_out.startswith("status:")
+        if n_status or c_status:
+            # typed status must be the first line of the tool output
+            lead = "\n\n".join(dict.fromkeys(o for o, st in ((notes_out, n_status), (code_out, c_status)) if st))
+            notes_out = "(none)" if n_status else notes_out
+            code_out = "(none)" if c_status else code_out
+            return f"{lead}\n\n## Notes\n\n{notes_out}\n\n## Code\n\n{code_out}"
         return f"## Notes\n\n{notes_out}\n\n## Code\n\n{code_out}"

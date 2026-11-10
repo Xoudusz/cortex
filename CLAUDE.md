@@ -48,6 +48,7 @@ core/                   # ONE shared lib — bundled into the wheel as cortex/co
   graph.py              # facade — re-exports from code_graph, notes_graph, global_graph
   code_graph.py         # import/call/inheritance edges, centrality, Louvain + inject_roslyn_edges()
   notes_graph.py        # Obsidian wikilink graph + PPR augmentation
+  savings.py            # tokens-avoided accounting (stdlib only; all _stats serializers use snapshot())
   global_graph.py       # cross-repo edges from root config files
   roslyn_analyzer.py    # subprocess wrapper for CortexAnalyzer binary
   roslyn_tool/          # .NET 8 console app — CSharpSyntaxTree.ParseText, no MSBuild needed
@@ -81,7 +82,8 @@ local/                  # cortex PyPI package — pipx install, stdio MCP, no se
     indexer.py          # embedded Qdrant indexer (notes + code), tqdm progress
     embedder.py         # fastembed dense (nomic-embed-text-v1.5) + BM25 sparse
     config.py           # ~/.cortex paths, config.toml (get_config, save_last_indexed_path)
-    state.py            # graph cache, stats lifecycle
+    state.py            # graph cache, stats lifecycle, maybe_save_stats (5s throttle)
+    tui.py              # `cortex stats --tui/--watch` (rich)
     watcher.py          # CortexWatcher — all index roots, code + .md, write events only, debounced
     db.py               # shared embedded-Qdrant client per workspace + index_lock (never open QdrantClient elsewhere)
     __init__.py         # source checkouts: exposes <repo>/core as cortex.core (no symlink — broke Windows)
@@ -96,6 +98,7 @@ docker-compose.yml      # ollama + qdrant + cortex-mcp (server mode)
 - `search_code(query, limit)` — semantic search over source code + centrality re-ranking
 - `search_all(query, limit)` — search both collections simultaneously, combined output
 - `get_neighbors(file, repo)` — imports + imported-by for a file
+- Empty/missing index → first line `status: <code>` (`fmt_status`/`classify_empty` in core/formatters.py), never bare "No results found."
 - `get_community(repo, community_id)` — all files in a Louvain cluster
 - `reindex(notes, code, repo, force?)` — async; `force=True` clears embed cache first (~10x slower)
 - `reindex_status()` — check progress of last reindex

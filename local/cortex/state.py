@@ -1,10 +1,12 @@
 """Runtime state and graph cache for cortex local mode."""
 
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import data_dir, stats_file, VERSION
+from .core.savings import snapshot as _snapshot
 
 _graph_cache: dict = {}
 _stats: dict = {}
@@ -27,6 +29,13 @@ def _default_stats() -> dict:
         "context_tokens_code": 0,
         "ppr_below_threshold": 0,
         "ppr_exception": 0,
+        "tokens_observed_code": 0,
+        "tokens_observed_notes": 0,
+        "tokens_modeled_code": 0,
+        "savings_hits_measured": 0,
+        "savings_hits_unmeasured": 0,
+        "savings_by_repo": {},
+        "savings_by_user": {},
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -39,7 +48,11 @@ def _load_stats() -> dict:
             data = json.loads(sf.read_text())
             saved = data.get("versions", {}).get(VERSION, {})
             if saved:
-                return {**defaults, **saved}
+                merged = {**defaults, **saved}
+                for k in ("savings_by_repo", "savings_by_user"):
+                    if not isinstance(merged.get(k), dict):
+                        merged[k] = {}
+                return merged
     except Exception:
         pass
     return defaults
@@ -51,11 +64,23 @@ def save_stats() -> None:
         existing: dict = {}
         if sf.exists():
             existing = json.loads(sf.read_text()).get("versions", {})
-        existing[VERSION] = {**_stats, "last_saved": datetime.now(timezone.utc).isoformat()}
+        existing[VERSION] = {**_snapshot(_stats), "last_saved": datetime.now(timezone.utc).isoformat()}
         sf.parent.mkdir(parents=True, exist_ok=True)
         sf.write_text(json.dumps({"versions": existing}, indent=2))
     except Exception:
         pass
+
+
+_last_save: float = 0.0
+
+
+def maybe_save_stats(min_interval: float = 5.0) -> None:
+    """Throttled save_stats so searches persist without a disk write per call."""
+    global _last_save
+    now = time.monotonic()
+    if now - _last_save >= min_interval:
+        _last_save = now
+        save_stats()
 
 
 def get_graph_meta(repo_name: str) -> dict:

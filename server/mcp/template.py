@@ -120,6 +120,16 @@ _UI_TEMPLATE = """<!DOCTYPE html>
         #reindex-log-wrap, #webhook-log-wrap, #admin-graph .card { overflow-x: auto; }
         .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; margin-bottom: 0.9rem; }
         .card-h { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
+        .sv-hero { font-size: 1.9rem; font-weight: 700; color: var(--text); line-height: 1.1; }
+        .sv-hero small { font-size: 0.8rem; font-weight: 400; color: var(--muted); margin-left: 0.35rem; }
+        .sv-formula { font-size: 0.72rem; color: var(--dim); margin: 0.3rem 0 0.7rem; }
+        .sv-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--panel3); }
+        .sv-obs { background: var(--ok); display: block; height: 100%; }
+        .sv-mod { background: var(--accent); display: block; height: 100%; }
+        .sv-legend { display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; font-size: 0.75rem; color: var(--muted); margin: 0.4rem 0 0.7rem; }
+        .sv-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 0.3rem; }
+        .sv-sec { font-size: 0.75rem; color: var(--muted); margin: 0.9rem 0 0.3rem; }
+        .sv-mini { display: flex; height: 6px; min-width: 60px; border-radius: 3px; overflow: hidden; background: var(--panel3); }
         .card-h h3 { font-size: 0.88rem; font-weight: 600; }
         .card-h .sub { font-size: 0.75rem; color: var(--dim); }
         .card-h .push { margin-left: auto; display: flex; gap: 0.4rem; align-items: center; }
@@ -321,6 +331,10 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                 <div class="card">
                     <div class="card-h"><h3>Graph efficiency</h3><span class="sub">search + cache counters since start</span><span class="push"><button id="history-btn" class="secondary small" style="display:none">Past versions</button></span></div>
                     <table class="webhook-table"><tbody id="graph-stats-body"><tr><td colspan="2" class="empty">Loading...</td></tr></tbody></table>
+                </div>
+                <div class="card" id="savings-card">
+                    <div class="card-h"><h3>Token savings</h3><span class="sub">estimated tokens agents did not read &middot; ~bytes/4</span></div>
+                    <div id="savings-body"><div class="empty">Loading...</div></div>
                 </div>
             </div>
             <div id="admin-webhooks" class="admin-section">
@@ -687,8 +701,55 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     } else {
                         btn.style.display = 'none';
                     }
+                    renderSavings(g);
                 }
             } catch (err) { console.error('Failed to load stats:', err); }
+        }
+
+        function fmtTok(n) {
+            n = Math.round(n || 0);
+            if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+            return String(n);
+        }
+
+        function renderSavings(g) {
+            const body = document.getElementById('savings-body');
+            if (!body) return;
+            const obs = (g.tokens_observed_code || 0) + (g.tokens_observed_notes || 0);
+            const mod = g.tokens_modeled_code || 0;
+            const total = obs + mod;
+            const hm = g.savings_hits_measured || 0;
+            const hu = g.savings_hits_unmeasured || 0;
+            if (!total && !hm && !hu) { body.innerHTML = '<div class="empty">No savings recorded yet.</div>'; return; }
+            const pct = total ? (obs / total * 100) : 0;
+            let h = '<div class="sv-hero">' + fmtTok(total) + '<small>tokens saved</small></div>';
+            h += '<div class="sv-formula">observed = full file &minus; returned chunk (once per file/session) &middot; modeled = 50% &times; unreturned candidates</div>';
+            h += '<div class="sv-bar"><span class="sv-obs" style="width:' + pct.toFixed(1) + '%"></span><span class="sv-mod" style="width:' + (total ? 100 - pct : 0).toFixed(1) + '%"></span></div>';
+            h += '<div class="sv-legend"><span><i style="background:var(--ok)"></i>observed ' + fmtTok(obs) + '</span><span><i style="background:var(--accent)"></i>modeled ' + fmtTok(mod) + '</span></div>';
+            h += '<div class="sv-formula" style="margin:0">hits measured ' + hm + ' &middot; unmeasured ' + hu + (hu > 0 ? ' <span class="repo-badge">reindex to measure</span>' : '') + '</div>';
+            const tbl = (title, label, map) => {
+                const rows = Object.entries(map || {}).map(([k, v]) => [k, (v && v.observed) || 0, (v && v.modeled) || 0, (v && v.hits) || 0])
+                    .sort((a, b) => (b[1] + b[2]) - (a[1] + a[2]));
+                if (!rows.length) return '';
+                return '<div class="sv-sec">' + title + '</div><table class="webhook-table"><thead><tr><th>' + label + '</th><th>Observed</th><th>Modeled</th><th>Hits</th></tr></thead><tbody>'
+                    + rows.map(r => '<tr><td>' + escapeHtml(r[0]) + '</td><td>' + fmtTok(r[1]) + '</td><td>' + fmtTok(r[2]) + '</td><td>' + r[3] + '</td></tr>').join('') + '</tbody></table>';
+            };
+            h += tbl('By repo', 'Repo', g.savings_by_repo);
+            h += tbl('By user', 'User', g.savings_by_user);
+            const hist = g.history || {};
+            const tot = d => ((d && d.tokens_observed_code) || 0) + ((d && d.tokens_observed_notes) || 0) + ((d && d.tokens_modeled_code) || 0);
+            const vers = Object.keys(hist).map(v => [v, hist[v]]);
+            if (g.version) vers.push([String(g.version), g]);
+            const p = v => v.split('.').map(x => parseInt(x, 10) || 0);
+            vers.sort((a, b) => { const [a1, a2, a3] = p(a[0]); const [b1, b2, b3] = p(b[0]); return b1 - a1 || b2 - a2 || b3 - a3; });
+            if (vers.length > 1) {
+                const mx = Math.max(1, ...vers.map(x => tot(x[1])));
+                h += '<div class="sv-sec">By version</div><table class="webhook-table"><tbody>'
+                    + vers.map(([v, d]) => { const t = tot(d); return '<tr><td>' + escapeHtml(v) + '</td><td>' + fmtTok(t) + '</td><td style="width:45%"><div class="sv-mini"><span class="sv-obs" style="width:' + (t / mx * 100).toFixed(1) + '%"></span></div></td></tr>'; }).join('')
+                    + '</tbody></table>';
+            }
+            body.innerHTML = h;
         }
 
         async function loadWebhookLog() {

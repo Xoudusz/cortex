@@ -32,6 +32,13 @@ cortex index ~/notes
 cortex index ~/projects/my-app
 ```
 
+See how many tokens cortex saved your agent (≈ bytes/4 estimate, observed + modeled):
+
+```bash
+cortex stats --tui     # snapshot
+cortex stats --watch   # live refresh
+```
+
 ---
 
 ## MCP tools
@@ -44,7 +51,7 @@ cortex index ~/projects/my-app
 | `get_community(repo, community_id)` | All files in the same Louvain cluster |
 | `reindex(notes, code, repo)` | Async re-index (returns immediately) |
 | `reindex_status()` | Check reindex progress |
-| `get_stats()` | Efficiency metrics |
+| `get_stats()` | Efficiency metrics incl. estimated tokens avoided |
 | `get_onboarding(existing_content)` | CLAUDE.md template with cortex instructions |
 | `switch_workspace(name)` | Switch active workspace (isolated collections + repos) |
 | `list_workspaces()` | List your workspaces and their index status |
