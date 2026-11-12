@@ -343,7 +343,7 @@ _UI_TEMPLATE = """<!DOCTYPE html>
                     <table class="webhook-table"><tbody id="graph-stats-body"><tr><td colspan="2" class="empty">Loading...</td></tr></tbody></table>
                 </div>
                 <div class="card" id="savings-card">
-                    <div class="card-h"><h3>Token savings</h3><span class="sub">estimated tokens agents did not read &middot; ~bytes/4</span></div>
+                    <div class="card-h"><h3>Token savings</h3><span class="sub">tokens Claude didn&rsquo;t have to read, thanks to cortex</span></div>
                     <div id="savings-body"><div class="empty">Loading...</div></div>
                 </div>
             </div>
@@ -775,10 +775,9 @@ _UI_TEMPLATE = """<!DOCTYPE html>
             const total = obs + mod;
             const hm = g.savings_hits_measured || 0;
             const hu = g.savings_hits_unmeasured || 0;
-            if (!total && !hm && !hu) { body.innerHTML = '<div class="empty">No savings recorded yet.</div>'; return; }
             const pct = total ? (obs / total * 100) : 0;
             let h = '<div class="sv-hero">' + fmtTok(total) + '<small>tokens saved</small></div>';
-            h += '<div class="sv-formula">observed = full file &minus; returned chunk (once per file/session) &middot; modeled = 50% &times; unreturned candidates</div>';
+            h += '<div class="sv-formula">observed = full file &minus; returned chunk (once per file/session) &middot; modeled = 50% &times; unreturned candidates &middot; tokens &asymp; bytes/4</div>';
             h += '<div class="sv-bar"><span class="sv-obs" style="width:' + pct.toFixed(1) + '%"></span><span class="sv-mod" style="width:' + (total ? 100 - pct : 0).toFixed(1) + '%"></span></div>';
             h += '<div class="sv-legend"><span><i style="background:var(--ok)"></i>observed ' + fmtTok(obs) + '</span><span><i style="background:var(--accent)"></i>modeled ' + fmtTok(mod) + '</span></div>';
             h += '<div class="sv-formula" style="margin:0">hits measured ' + hm + ' &middot; unmeasured ' + hu + (hu > 0 ? ' <span class="repo-badge">reindex to measure</span>' : '') + '</div>';
