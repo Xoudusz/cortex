@@ -20,6 +20,7 @@ from .config import data_dir, cache_file, VECTOR_SIZE, get_config, read_index_me
 from .embedder import embed, sparse_embed
 from .core.chunker import chunk_file, CODE_EXTS, SKIP_DIRS, _is_excluded, repo_ignore_patterns
 from .core.cache import load_cache, save_cache
+from .core.markdown_split import markdown_chunks
 from .core import graph as _graph
 from .core import roslyn_analyzer as _roslyn
 
@@ -95,31 +96,7 @@ def _chunk_markdown(path: Path, notes_dir: Path) -> list:
     rel = path.relative_to(notes_dir).as_posix()
     modified_at = int(path.stat().st_mtime)
     text, tags = _parse_frontmatter(raw)
-
-    chunks, current_heading, current_lines = [], path.stem, []
-    for line in text.splitlines():
-        if re.match(r"^#{1,3} ", line):
-            if current_lines:
-                body = "\n".join(current_lines).strip()
-                if body:
-                    chunks.append({"heading": current_heading, "file": rel, "tags": tags,
-                                   "modified_at": modified_at,
-                                   "text": f"{current_heading}\n\n{body}"})
-            current_heading = line.lstrip("#").strip()
-            current_lines = []
-        else:
-            current_lines.append(line)
-    if current_lines:
-        body = "\n".join(current_lines).strip()
-        if body:
-            chunks.append({"heading": current_heading, "file": rel, "tags": tags,
-                           "modified_at": modified_at, "text": f"{current_heading}\n\n{body}"})
-    if not chunks:
-        body = text.strip()
-        if body:
-            chunks.append({"heading": path.stem, "file": rel, "tags": tags,
-                           "modified_at": modified_at, "text": body})
-    return chunks
+    return markdown_chunks(text, path.stem, rel, tags, modified_at)
 
 
 def _point_id(*parts) -> int:

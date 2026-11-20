@@ -98,6 +98,18 @@ def test_chunk_markdown_small_note_keeps_heading_ids():
         assert [c["heading"] for c in index.chunk_markdown(f)] == ["A", "B"]
 
 
+def test_local_chunk_markdown_caps_size_and_ids_unique():
+    from cortex import indexer as local_indexer  # local package: core bundled into cortex/core
+    assert str(Path(local_indexer.__file__).resolve()).startswith(str(Path(__file__).resolve().parents[1] / 'local')), 'stale installed cortex copy'
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "big.md"
+        f.write_text("# Big\n\n" + "\n\n".join("text " * 150 + str(i) for i in range(10)), encoding="utf-8")
+        chunks = local_indexer._chunk_markdown(f, Path(d))
+        assert len(chunks) > 1
+        assert all(len(c["text"]) <= index.MAX_CHUNK_CHARS for c in chunks)
+        assert len({c["heading"] for c in chunks}) == len(chunks)
+
+
 
 if __name__ == "__main__":
     import traceback
