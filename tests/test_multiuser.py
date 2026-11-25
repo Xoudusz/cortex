@@ -787,6 +787,17 @@ def test_template_pkce_and_switcher():
     assert 'id="invite-ws"' not in html
 
 
+
+def test_relay_page_copies_full_callback_url():
+    url = "http://localhost:52408/callback?code=abc123&state=xyz"
+    page = oauth._relay_success_page(url)
+    assert "code=abc123&amp;state=xyz" in page
+    assert "Copy URL" in page
+    assert "Copy Code" not in page and "Authorization Code" not in page and "__CODE__" not in page
+    evil = oauth._relay_success_page('http://localhost:1/cb"><script>alert(1)</script>?code=a')
+    assert "<script>alert" not in evil and "&lt;script&gt;" in evil
+
+
 if __name__ == "__main__":
     import traceback
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
